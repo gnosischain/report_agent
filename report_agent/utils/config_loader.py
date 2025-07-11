@@ -14,7 +14,7 @@ def load_configs() -> dict:
       • DBT docs location (URL or local path)
       • Metric definitions from configs/metrics.yml
     """
-    root = Path.cwd()
+    pkg_root = Path(__file__).resolve().parent.parent
 
     clickhouse = {
         "host":     os.getenv("CLICKHOUSE_HOST"),
@@ -34,7 +34,7 @@ def load_configs() -> dict:
         "base_url":   os.getenv("DBT_DOCS_BASE_URL")
     }
 
-    metrics_path = root / "configs" / "metrics.yml"
+    metrics_path = pkg_root / "configs" / "metrics.yml"
     if not metrics_path.exists():
         raise FileNotFoundError(f"Missing metrics YAML at {metrics_path}")
     with metrics_path.open() as f:

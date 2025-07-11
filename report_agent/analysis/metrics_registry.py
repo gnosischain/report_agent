@@ -1,4 +1,4 @@
-from utils.config_loader import load_configs
+from report_agent.utils.config_loader import load_configs
 
 class MetricsRegistry:
     def __init__(self):

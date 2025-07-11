@@ -1,11 +1,9 @@
-# connectors/clickhouse_connector.py
-
 import logging
 import clickhouse_connect
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError, ProgrammingError
 import pandas as pd
 
-from utils.config_loader import load_configs
+from report_agent.utils.config_loader import load_configs
 
 log = logging.getLogger(__name__)
 
