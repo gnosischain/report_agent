@@ -1,0 +1,5 @@
+metrics:
+  - model: execution_txs_info_daily
+  - model: consensus_validators_balances_dist_daily
+  - model: p2p_peers_clients_daily
+  - model: yields_sdai_rate_daily
