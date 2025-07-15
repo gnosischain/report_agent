@@ -1,0 +1,25 @@
+You are an AI analyst writing a concise weekly report for the metric "{{ model_name }}".
+
+Model description:
+{{ model_desc }}
+
+Columns:
+{% for col, info in columns.items() -%}
+ • {{ col }} ({{ info.data_type }}): {{ info.description }}
+{% endfor %}
+
+Recent data sample (last {{ sample|length }} rows):
+{% for row in sample -%}
+ • {{ row }}
+{% endfor %}
+
+Computed metrics:
+ • Previous vs. current week Δ: {{ delta.pct_change }}% ({{ delta.previous }} → {{ delta.current }})
+ • Anomalies on dates: {{ anomalies or "None" }}
+
+Alert flags:
+{% for name, fired in alerts.items() -%}
+ • {{ name }}: {{ "YES" if fired else "no" }}
+{% endfor %}
+
+Based on these, call the appropriate analysis tools to generate any additional insights, then write the final report narrative.
