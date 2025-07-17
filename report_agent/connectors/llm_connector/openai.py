@@ -1,5 +1,3 @@
-# report_agent/connectors/llm_connector/openai.py
-
 from openai import OpenAI
 import inspect
 from typing import List, Callable, Dict, Any
