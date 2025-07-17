@@ -1,5 +1,7 @@
 # Report Agent Roadmap (v0)
 
+> **Note:** A sandbox version using the OpenAI Code Interpreter tool is being developed in parallel on the `code‑interpreter` branch.
+
 _A high-level, evolving plan for our AI-powered weekly reporting system. Focus here is on priorities & rationale — exact file layout to follow._
 
 ---
@@ -33,7 +35,7 @@ _A high-level, evolving plan for our AI-powered weekly reporting system. Focus h
      - `compare_periods(df, date_col, value_col, period)`
 
 5. **Orchestration & NLG**  
-   Coordinates the end-to-end workflow:
+   Coordinates the end-to-end workflow:  
    - Chooses which metrics to report on  
    - Loads time-series data and metadata  
    - Invokes the analysis toolbox (via LLM function-calling and local execution)  
@@ -54,8 +56,8 @@ _A high-level, evolving plan for our AI-powered weekly reporting system. Focus h
      - LLM-orchestrated multi-step via function-calling.  
    - Sketch inputs/outputs but leave implementation details flexible.
 
-3. **LLM Orchestration (function-calling)** (at first but possible to switch to python sandbox inside google resources)
-   - Register a suite of analysis tools:   
+3. **LLM Orchestration (function‑calling)**  
+   - Register a suite of analysis tools:  
      - `compute_weekly_delta(...)`  
      - `detect_anomalies(...)`  
      - `summarize_trends(...)`  
@@ -69,7 +71,7 @@ _A high-level, evolving plan for our AI-powered weekly reporting system. Focus h
 4. **History / State (TBD)**  
    - Options:  
      - A `report_history` table in ClickHouse  
-     - ... 
+     - ...  
    - Goals: record `(run_date, metric, pct_change, alerted)` so we only surface **new** anomalies.
 
 ---
@@ -77,11 +79,11 @@ _A high-level, evolving plan for our AI-powered weekly reporting system. Focus h
 ## Next Steps
 
 1. **Finalize Analysis Functions**  
-   - Define which functions we’ll support
+   - Define which functions we’ll support  
    - Decide:  
      - Pure Python pre-aggregation, or  
      - LLM-orchestrated multi-step via function-calling.  
-   - Sketch inputs/outputs but leave implementation details flexible. 
+   - Sketch inputs/outputs but leave implementation details flexible.
 
 2. **LLM Tool Registration**  
    - Function schemas from docstrings and signatures.  
@@ -91,8 +93,8 @@ _A high-level, evolving plan for our AI-powered weekly reporting system. Focus h
    - Jinja templates that blend metadata and data summaries.  
    - Craft prompts that steer the LLM through analysis → narrative.
 
-4. **Chat-Loop Orchestration**  
-   - Implement the function-calling loop: send prompt + tools → handle calls → feed results → final narrative / Repeat Loop 
+4. **Chat‑Loop Orchestration**  
+   - Implement the function‑calling loop: send prompt + tools → handle calls → feed results → final narrative / Repeat Loop  
    - Log every tool invocation for auditability.
 
 5. **State Management**  
