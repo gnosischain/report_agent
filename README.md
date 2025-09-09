@@ -1,6 +1,6 @@
 # Report Agent Roadmap (v0)
 
-> **Note:** A sandbox version using the OpenAI Code Interpreter tool is being developed in parallel on the `code‑interpreter` branch.
+> **Note:** A sandbox versions using the OpenAI Code Interpreter tool is being developed in parallel on the `code‑interpreter` and `sandbox` branch.
 
 _A high-level, evolving plan for our AI-powered weekly reporting system. Focus here is on priorities & rationale — exact file layout to follow._
 
