@@ -32,3 +32,25 @@ def build_prompt(model: str, df_sample, delta, anomalies, alerts) -> str:
         anomalies=anomalies,
         alerts=alerts,
     )
+
+
+def build_ci_prompt(
+    model: str,
+    history_days: int,
+    csv_filename: str,
+    schema_filename: str,
+    meta_filename: str,
+    docs_filename: str = None
+) -> str:
+    """
+    Render the free-form interpreter prompt. We only pass filenames and days;
+    the model will decide everything else.
+    """
+    template = env.get_template("ci_report_prompt.j2")
+    return template.render(
+        csv_filename=csv_filename,
+        schema_filename=schema_filename,
+        meta_filename=meta_filename,
+        docs_filename=docs_filename,
+        history_days=history_days,
+    )

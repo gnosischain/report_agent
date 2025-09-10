@@ -27,3 +27,10 @@ class MetricsRegistry:
         """
         metric = self.get(model_name)
         return metric.get("thresholds", {})
+    
+    def get_history_days(self, model_name: str) -> int:
+        """
+        Return configured history window in days, defaulting to 180 if not set.
+        """
+        metric = self.get(model_name)
+        return int(metric.get("history_days", 180))

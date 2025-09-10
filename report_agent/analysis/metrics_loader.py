@@ -6,21 +6,23 @@ class MetricsLoader:
         self.db       = ClickHouseConnector()
         self.registry = MetricsRegistry()
 
-    def fetch_time_series(self, model: str, lookback_days: int = 14):
+    def fetch_time_series(self, model: str, lookback_days: int = None):
         """
-        Pulls every column from `model` for the last `lookback_days`.
-        Returns a DataFrame with all original columns (including 'date').
+        Pull raw rows for `model` for the last N days.
+        Always returns all original columns (including 'date'), sorted ascending by `date`.
+        NOTE: There may be multiple rows per day (long format). We do not aggregate.
         """
         if not self.registry.has(model):
             raise KeyError(f"Unknown metric {model}")
 
-        # assume time column is always named 'date'
+        # Always use 'date' as time column (you confirmed this invariant).
         time_col = "date"
+        days = int(lookback_days or self.registry.get_history_days(model))
 
         sql = f"""
             SELECT *
             FROM {self.db.read.database}.{model}
-            WHERE `{time_col}` >= today() - INTERVAL {lookback_days} DAY
+            WHERE `{time_col}` >= today() - INTERVAL {days} DAY
             ORDER BY `{time_col}` ASC
         """
         return self.db.fetch_df(sql)
