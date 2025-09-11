@@ -56,7 +56,7 @@ class CodeInterpreterConnector(LLMConnector):
         return schema
 
     def run_report(self, model_name: str, lookback_days: int = None) -> str:
-        # 1) Load configs/registry and fetch raw data (enough history, raw rows)
+        # Load configs/registry and fetch raw data (enough history, raw rows)
         cfg = load_configs()
         registry = MetricsRegistry()
         loader = MetricsLoader()
@@ -70,7 +70,7 @@ class CodeInterpreterConnector(LLMConnector):
         if "date" not in df.columns:
             return f"Model '{model_name}' has no 'date' column; cannot proceed."
 
-        # 2) Prepare files (CSV + schema + meta + optional docs)
+        # Prepare files (CSV + schema + meta + docs)
         tmpdir = tempfile.mkdtemp(prefix=f"{model_name.replace('.', '_')}_")
         csv_path = os.path.join(tmpdir, f"{model_name}.csv")
         schema_path = os.path.join(tmpdir, f"{model_name}.schema.json")
@@ -95,7 +95,7 @@ class CodeInterpreterConnector(LLMConnector):
         }
         Path(meta_path).write_text(json.dumps(meta, indent=2))
 
-        # Optional: dbt docs (best-effort)
+        # dbt docs (best-effort)
         docs_filename = None
         try:
             manifest = load_manifest(cfg)
@@ -111,7 +111,6 @@ class CodeInterpreterConnector(LLMConnector):
             # Silent fallback; schema/meta/CSV are enough
             pass
 
-        # 3) Build the free-form prompt
         prompt = build_ci_prompt(
             model=model_name,
             history_days=history,
@@ -147,7 +146,6 @@ class CodeInterpreterConnector(LLMConnector):
             },
         }]
 
-        # Strong nudge: must use python; complete all steps now
         instructions = (
             "You are a data analyst. Always use the python tool to load the attached files and execute your "
             "analysis. Do not stop after verifying the data; complete all steps (load, analyze, visualize if useful, "
@@ -170,7 +168,6 @@ class CodeInterpreterConnector(LLMConnector):
         if isinstance(text, str) and text.strip():
             return text
 
-        # Fallback: try to gather any text parts
         try:
             parts = []
             output = getattr(resp, "output", None)
@@ -189,5 +186,5 @@ class CodeInterpreterConnector(LLMConnector):
         except Exception:
             pass
 
-        # Last resort
+        # last resort
         return str(resp)

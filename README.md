@@ -1,104 +1,149 @@
-# Report Agent Roadmap (v0)
+# Report Agent (code-interpreter)
 
-> **Note:** A sandbox versions using the OpenAI Code Interpreter tool is being developed in parallel on the `code‑interpreter` and `sandbox` branch.
-
-_A high-level, evolving plan for our AI-powered weekly reporting system. Focus here is on priorities & rationale — exact file layout to follow._
+Concise, modular system to generate **weekly data reports** directly from ClickHouse + dbt docs using OpenAI’s **Code Interpreter** (python tool). The model receives **raw tables** (CSV) plus neutral context (schema, meta, dbt docs), then decides how to analyze, visualize, and summarize — **no precomputed metrics**.
 
 ---
 
-## Architecture Overview
+## Key Features
 
-1. **Config Loader**  
-   Central source of truth for all credentials, endpoints, and metric definitions.  
-   **File:** `utils/config_loader.py`
-
-2. **Connectors**  
-   - **ClickHouseConnector** (`connectors/clickhouse_connector.py`):  
-     Read-only + write clients, TLS support, automatic DataFrame conversion.  
-   - **LLMConnector** (`connectors/llm_connector/`):  
-     Base class + provider-specific implementations (Gemini, OpenAI, etc.), registers analysis tools via function-calling.
-
-3. **Metadata Layer (`dbt_context/`)**  
-   Ingests your dbt model definitions and column docs from `manifest.json` & `catalog.json`.  
-   **Adapters:**  
-   - `from_docs_json.py`: fetch & parse live GitHub-Pages JSON  
-
-4. **Analysis Layer (`analysis/`)**  
-   Your “toolbox” of pure-Python functions that compute metrics, detect anomalies, and summarize trends.  
-   - **Registry** (`metrics_registry.py`): loads `configs/metrics.yml` → metric list  
-   - **Loader** (`metrics_loader.py`): fetches full DataFrames for each metric  
-   - **Analyzer** (`analyzer.py`):  
-     - `compute_weekly_delta(df, date_col, value_col, window)`  
-     - `detect_anomalies(df, date_col, value_col, z_thresh)`  
-     - `moving_average(df, date_col, value_col, window)`  
-     - `summary_statistics(df, value_col)`  
-     - `compare_periods(df, date_col, value_col, period)`
-
-5. **Orchestration & NLG**  
-   Coordinates the end-to-end workflow:  
-   - Chooses which metrics to report on  
-   - Loads time-series data and metadata  
-   - Invokes the analysis toolbox (via LLM function-calling and local execution)  
-   - Guides the LLM to generate narratives  
-   - Emits structured output for downstream distribution (distribution to be discussed later)
+- **Free-form analysis**: model runs Python in a sandbox (Responses API + code_interpreter).
+- **Raw, long-format input**: supports multiple rows per `date` (e.g., `date, metric, label, value`).
+- **Neutral context**: attaches `*.schema.json` (dtypes/examples), `*.meta.json` (coverage/columns), and optional `*.docs.md` (dbt model + columns).
+- **No tool lock-in**: we do not restrict to specific analysis functions; the model chooses.
+- **Safe defaults**: read-only SQL, no network calls in the sandbox, plots saved to `plots/`.
 
 ---
 
-## First Milestones
+## Repository Layout
 
-1. **Metadata Layer (dbt_context)**  
-   - **from_docs_json**: fetch & parse `manifest.json` (+ `catalog.json`) from dbt-cerebro docs.
-
-2. **Analysis Layer (TBD)**  
-   - Define which functions we’ll support (e.g. delta, anomaly, trend summary).  
-   - Decide:  
-     - Pure Python pre-aggregation, or  
-     - LLM-orchestrated multi-step via function-calling.  
-   - Sketch inputs/outputs but leave implementation details flexible.
-
-3. **LLM Orchestration (function‑calling)**  
-   - Register a suite of analysis tools:  
-     - `compute_weekly_delta(...)`  
-     - `detect_anomalies(...)`  
-     - `summarize_trends(...)`  
-     - _[add more as needed]_  
-   - Use a **chat loop**:  
-     1. Send prompt + tool specs  
-     2. LLM calls a tool → we execute & return JSON  
-     3. Repeat until LLM returns a final text message  
-   - This gives the model **agency** to choose its analysis path while ensuring numeric precision.
-
-4. **History / State (TBD)**  
-   - Options:  
-     - A `report_history` table in ClickHouse  
-     - ...  
-   - Goals: record `(run_date, metric, pct_change, alerted)` so we only surface **new** anomalies.
+```
+report_agent/
+  analysis/
+    agent_tools.py           # (function-calling tools; not used in code-interpreter path)
+    analyzer.py              # pure-Python helpers (used in tools path)
+    metrics_loader.py        # fetch raw rows from ClickHouse
+    metrics_registry.py      # read configs/metrics.yml
+    thresholds.py            # (tools path)
+  configs/
+    metrics.yml              # metric list + history window
+  connectors/
+    clickhouse_connector.py  # read-only client
+    llm_connector/
+      base.py                # base LLM connector
+      code_interpreter.py    # Responses API, container w/ file_ids, runs full analysis
+      openai.py              # (function-calling path)
+  dbt_context/
+    from_docs_json.py        # optional docs from manifest/catalog
+  nlg/
+    prompt_builder.py        # builds prompts
+    templates/
+      ci_report_prompt.j2    # free-form code-interpreter prompt (no precomputation)
+  utils/
+    config_loader.py         # loads .env and config
+```
 
 ---
 
-## Next Steps
+## Requirements
 
-1. **Finalize Analysis Functions**  
-   - Define which functions we’ll support  
-   - Decide:  
-     - Pure Python pre-aggregation, or  
-     - LLM-orchestrated multi-step via function-calling.  
-   - Sketch inputs/outputs but leave implementation details flexible.
+- Python 3.10+ recommended
+- `pip install -r requirements.txt`
+- Recent OpenAI SDK (`openai>=1.40.0`)
 
-2. **LLM Tool Registration**  
-   - Function schemas from docstrings and signatures.  
-   - Ensure descriptions clearly explain inputs and outputs.
+---
 
-3. **Prompt Templates**  
-   - Jinja templates that blend metadata and data summaries.  
-   - Craft prompts that steer the LLM through analysis → narrative.
+## Configuration
 
-4. **Chat‑Loop Orchestration**  
-   - Implement the function‑calling loop: send prompt + tools → handle calls → feed results → final narrative / Repeat Loop  
-   - Log every tool invocation for auditability.
+Set credentials in `.env` (loaded by `utils/config_loader.py`):
 
-5. **State Management**  
-   - Prototype a simple `report_history` store to record past alerts.  
-   - Ensure only new or significant changes surface in each run.
+```
+# OpenAI
+OPENAI_API_KEY=...
+
+# ClickHouse
+CLICKHOUSE_HOST=...
+CLICKHOUSE_PORT=...
+CLICKHOUSE_USER=...
+CLICKHOUSE_PASSWORD=...
+CLICKHOUSE_DATABASE=...
+
+# dbt docs (optional)
+DBT_MANIFEST_URL=...
+DBT_CATALOG_URL=...
+```
+
+Define metrics in `report_agent/configs/metrics.yml` (history only — no thresholds needed for interpreter):
+
+```yaml
+metrics:
+  - model: api_p2p_discv4_clients_daily
+    history_days: 180
+```
+
+> **Conventions:** Every table has a `date` column. Multiple rows per `date` are allowed (long format).
+
+---
+
+## How It Works (Code Interpreter Path)
+
+1. **Load configs** → metric entry + `history_days`.
+2. **Fetch raw rows** from ClickHouse (no aggregation).
+3. **Create files**:
+   - `{model}.csv` (raw rows)
+   - `{model}.schema.json` (dtype flags + small examples)
+   - `{model}.meta.json` (row/col counts, date coverage, columns, history_days)
+   - `{model}.docs.md` (dbt docs)
+4. **Create a response** using OpenAI **Responses API**:
+   - `tools=[{"type":"code_interpreter","container":{"type":"auto","file_ids":[...]}}]`
+   - `tool_choice="required"`, `input=rendered prompt`
+5. **Model executes Python**: loads CSV, infers roles, analyzes, plots to `plots/`, writes final narrative:
+   - First line: `Meaningful change this week: YES/NO — <reason>`
+6. **Return** the final text (and references to plots saved by the model).
+
+---
+
+## Quick Start (Notebook)
+
+```python
+from report_agent.connectors.llm_connector.code_interpreter import CodeInterpreterConnector
+from report_agent.utils.config_loader import load_configs
+import os
+
+cfg = load_configs()
+api_key = os.getenv("OPENAI_API_KEY") or cfg.get("llm", {}).get("api_key")
+model_name = (cfg.get("llm", {}).get("model") or "gpt-4.1")
+
+ci = CodeInterpreterConnector(api_key=api_key, model_name=model_name)
+report_text = ci.run_report("api_p2p_discv4_clients_daily")
+print(report_text)
+```
+
+---
+
+## Best Practices
+
+- **History window**: set `history_days` generously (e.g., 180–365) to enable robust trend judgment.
+- **Long format**: include all raw columns; let the model pivot/group as needed.
+- **Plots**: model saves figures to `plots/` (relative, writable).
+- **Docs fallback**: if dbt docs are unavailable, the schema/meta still provide sufficient context.
+
+---
+
+## Troubleshooting
+
+- **“attachments” arg error**: ensure you’re not using `attachments=` with Responses; use `container.file_ids`.
+- **“Missing tools[0].container”**: include `{"type":"code_interpreter","container":{"type":"auto"}}`.
+- **“Invalid input: expected .pdf”**: don’t pass files as `input_file` items; mount via `container.file_ids`.
+- **PermissionError on plots**: use relative `plots/` directory (template already instructs this).
+- **No data returned**: verify ClickHouse creds/database/table and `history_days` window.
+
+---
+
+## Roadmap (Short)
+
+- Retrieve container-generated plots to local `reports/plots/` via Containers API.
+- Scheduled runs + Slack/Email delivery.
+- Multi-metric bundles (e.g., a P2P weekly pack).
+- Lightweight evaluation hooks (consistency checks on numbers in narrative).
 
 ---
