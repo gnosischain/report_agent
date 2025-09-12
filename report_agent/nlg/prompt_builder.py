@@ -42,15 +42,12 @@ def build_ci_prompt(
     meta_filename: str,
     docs_filename: str = None
 ) -> str:
-    """
-    Render the free-form interpreter prompt. We only pass filenames and days;
-    the model will decide everything else.
-    """
     template = env.get_template("ci_report_prompt.j2")
     return template.render(
+        model=model,                     # <-- add this
+        history_days=history_days,
         csv_filename=csv_filename,
         schema_filename=schema_filename,
         meta_filename=meta_filename,
         docs_filename=docs_filename,
-        history_days=history_days,
     )
