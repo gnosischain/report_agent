@@ -1,9 +1,12 @@
 from jinja2 import Environment, FileSystemLoader
 from report_agent.dbt_context.from_docs_json import load_manifest, get_model_node, get_column_metadata
 from report_agent.utils.config_loader import load_configs
+from importlib.resources import files
+
+template_dir = files("report_agent.nlg") / "templates"
 
 env = Environment(
-    loader=FileSystemLoader(searchpath="report_agent/nlg/templates"),
+    loader=FileSystemLoader(str(template_dir)),
     autoescape=True,
 )
 

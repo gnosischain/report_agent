@@ -2,8 +2,8 @@
 from pathlib import Path
 from typing import Sequence
 
-from report_agent.analysis.metrics_loader import MetricsLoader
-from report_agent.analysis.metrics_registry import MetricsRegistry
+from report_agent.metrics.metrics_loader import MetricsLoader
+from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.nlg.html_report import render_html_report
 
 def generate_html_report(

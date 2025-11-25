@@ -1,7 +1,7 @@
-# report_agent/nlg/html_report.py
 from datetime import datetime
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from importlib.resources import files
 
 try:
     import markdown as _md
@@ -9,8 +9,10 @@ try:
 except Exception:
     _MD_ENABLED = False
 
+template_dir = files("report_agent.nlg") / "templates"
+
 _env = Environment(
-    loader=FileSystemLoader("report_agent/nlg/templates"),
+    loader=FileSystemLoader(str(template_dir)),
     autoescape=select_autoescape(["html", "xml"]),
 )
 

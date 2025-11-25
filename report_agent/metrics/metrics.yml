@@ -1,0 +1,3 @@
+metrics:
+  - model: api_p2p_discv4_clients_daily
+    history_days: 180   # enough baseline; raw rows only

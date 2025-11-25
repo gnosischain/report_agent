@@ -1,5 +1,5 @@
-from report_agent.connectors.clickhouse_connector import ClickHouseConnector
-from report_agent.analysis.metrics_registry import MetricsRegistry
+from report_agent.connectors.db.clickhouse_connector import ClickHouseConnector
+from report_agent.metrics.metrics_registry import MetricsRegistry
 
 class MetricsLoader:
     def __init__(self):
