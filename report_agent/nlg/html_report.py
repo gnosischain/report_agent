@@ -20,9 +20,7 @@ def _md_to_html(text: str) -> str:
     if not text:
         return ""
     if _MD_ENABLED:
-        # fenced code + tables are useful for our reports
         return _md.markdown(text, extensions=["extra", "tables", "fenced_code"])
-    # fallback: minimal escaping inside <pre>
     import html as _html
     return f"<pre>{_html.escape(text)}</pre>"
 

@@ -31,3 +31,6 @@ dev = [
   "isort>=6.0.1",
   "flake8>=7.3.0",
 ]
+
+[project.scripts]
+report-agent = "report_agent.cli.main:main"

@@ -1,4 +1,3 @@
-# report_agent/connectors/llm_connector/openai.py
 from __future__ import annotations
 
 import json
@@ -42,13 +41,9 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         self.tools = [{"type": "code_interpreter", "container": {"type": "auto"}}]
         self._last_artifacts: Optional[dict] = None
 
-    # ---- Tools API (no-op here) ----
-
     def register_tools(self, functions):
-        # No JSON function-calling tools in this connector; code interpreter only.
         self.tools = [{"type": "code_interpreter", "container": {"type": "auto"}}]
 
-    # ---- Helpers ----
 
     def _df_to_schema_json(self, df: pd.DataFrame) -> dict:
         def is_datetime(s: pd.Series) -> bool:
@@ -72,7 +67,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
     # ---- Public API expected by callers ----
 
     def run_report(self, model_name: str, lookback_days: int | None = None) -> str:
-        # 1) Load configs/registry and fetch raw data (enough history, raw rows)
         cfg = load_configs()
         registry = MetricsRegistry()
         loader = MetricsLoader()
@@ -85,21 +79,17 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         if "date" not in df.columns:
             return f"Model '{model_name}' has no 'date' column; cannot proceed."
 
-        # 2) Prepare files (CSV + schema + meta + optional docs)
         tmpdir = tempfile.mkdtemp(prefix=f"{model_name.replace('.', '_')}_")
         csv_path = os.path.join(tmpdir, f"{model_name}.csv")
         schema_path = os.path.join(tmpdir, f"{model_name}.schema.json")
         meta_path = os.path.join(tmpdir, f"{model_name}.meta.json")
         docs_path: Optional[str] = None
 
-        # CSV
         df.to_csv(csv_path, index=False)
 
-        # Schema
         schema_json = self._df_to_schema_json(df)
         Path(schema_path).write_text(json.dumps(schema_json, indent=2))
 
-        # Meta
         meta = {
             "n_rows": int(len(df)),
             "n_cols": int(len(df.columns)),
@@ -110,7 +100,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         }
         Path(meta_path).write_text(json.dumps(meta, indent=2))
 
-        # Optional: dbt docs (best-effort)
         docs_filename = None
         try:
             manifest = load_manifest(cfg)
@@ -123,10 +112,8 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             Path(docs_path).write_text("\n".join([l for l in lines if l]))
             docs_filename = os.path.basename(docs_path)
         except Exception:
-            # Silent fallback; schema/meta/CSV are enough
             pass
 
-        # 3) Build the free-form prompt
         prompt = build_ci_prompt(
             model=model_name,
             history_days=history,
@@ -136,7 +123,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             docs_filename=docs_filename,
         )
 
-        # 4) Upload files and collect file_ids for the container
         file_ids = []
         with open(csv_path, "rb") as f_csv:
             csv_file = self.client.files.create(file=f_csv, purpose="assistants")
@@ -153,7 +139,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                 docs_file = self.client.files.create(file=f_docs, purpose="assistants")
                 file_ids.append(docs_file.id)
 
-        # 5) Create the response with a code_interpreter container that includes these files
         tools = [{
             "type": "code_interpreter",
             "container": {
@@ -163,12 +148,8 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         }]
 
         instructions = (
-            "You are a data analyst. Always use the python tool to load the attached files and execute your analysis. "
-            "Perform all verification silently. Do not include logs, code, or step-by-step narration. Output only the "
-            "final BD-facing report as specified, and produce exactly two supporting figures: (1) Headline weekly "
-            "total trend with the last two weeks highlighted and WoW annotation, (2) Last week vs prior week grouped "
-            "bars for top 5 movers by absolute change. Save to plots/{{model}}_headline_weekly.png and "
-            "plots/{{model}}_top5_wow.png and display both so they are cited."
+            "You are a data analyst. Always use the python tool to load the attached files. "
+            "Follow the task specification given in the input."
         )
 
         resp = self.client.responses.create(
@@ -182,13 +163,11 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             temperature=0.2,
         )
 
-        # Collect container artifacts (citations)
         try:
             self._last_artifacts = self._extract_container_artifacts(resp)
         except Exception:
             self._last_artifacts = None
 
-        # 6) Return final text (try several shapes)
         text = getattr(resp, "output_text", None)
         if isinstance(text, str) and text.strip():
             return text
@@ -213,7 +192,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
 
         return str(resp)
 
-    # ---------- Artifacts (citations) ----------
 
     def _extract_container_artifacts(self, resp) -> dict | None:
         artifacts = {"container_ids": [], "files": []}
@@ -222,7 +200,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         output = getattr(resp, "output", None)
         if isinstance(output, list):
             for item in output:
-                # Dict-shape
                 if isinstance(item, dict) and item.get("type") == "message":
                     for content in (item.get("content") or []):
                         anns = content.get("annotations") or []
@@ -239,7 +216,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                                         "file_id": fid,
                                         "filename": fname,
                                     })
-                # Attr-shape
                 elif hasattr(item, "content"):
                     for content in (item.content or []):
                         anns = getattr(content, "annotations", None) or []
@@ -264,7 +240,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         """Return artifacts collected from the most recent run (or None)."""
         return getattr(self, "_last_artifacts", None)
 
-    # ---------- Downloads ----------
 
     def _get_base_url(self) -> str:
         env_base = os.getenv("OPENAI_BASE_URL")
@@ -314,7 +289,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             try:
                 content_bytes = None
 
-                # Prefer SDK method
                 try:
                     if callable(sdk_retrieve):
                         resp = sdk_retrieve(container_id=cid, file_id=fid)
@@ -325,7 +299,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                 except Exception:
                     content_bytes = None
 
-                # Fallback to raw HTTP
                 if content_bytes is None:
                     url = f"{base_url}/containers/{cid}/files/{fid}/content"
                     headers = {"Authorization": f"Bearer {api_key}"}
