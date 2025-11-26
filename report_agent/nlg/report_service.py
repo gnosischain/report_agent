@@ -1,4 +1,3 @@
-# report_agent/nlg/report_service.py
 from pathlib import Path
 from typing import Sequence
 
@@ -9,7 +8,7 @@ from report_agent.nlg.html_report import render_html_report
 
 def generate_html_report(
     model: str,
-    connector,                   # OpenAICodeInterpreterConnector (duck-typed)
+    connector,                   
     out_dir: str = "reports",
     plots_subdir: str = "plots",
     data_subdir: str = "data",
@@ -31,16 +30,13 @@ def generate_html_report(
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    # 1) Run interpreter to get narrative text
     narrative = connector.run_report(model)
 
-    # 1b) Save narrative text for later (used by portfolio summary LLM)
     text_dir = out_root / text_subdir
     text_dir.mkdir(parents=True, exist_ok=True)
     text_path = text_dir / f"{model}.txt"
     text_path.write_text(narrative, encoding="utf-8")
 
-    # 2) Download any plots the model created
     plots_dir_path = out_root / plots_subdir
     plots_dir_path.mkdir(parents=True, exist_ok=True)
     saved = connector.download_artifacts(output_dir=str(plots_dir_path))
@@ -51,7 +47,6 @@ def generate_html_report(
         and str(p).lower().endswith((".png", ".jpg", ".jpeg", ".gif"))
     ]
 
-    # 2b) Save an index of plot paths for this metric (for the summary page)
     plots_index_dir = out_root / plots_index_subdir
     plots_index_dir.mkdir(parents=True, exist_ok=True)
     plots_index_path = plots_index_dir / f"{model}.txt"
@@ -60,7 +55,6 @@ def generate_html_report(
     else:
         plots_index_path.write_text("", encoding="utf-8")
 
-    # 3) Save raw data (time series or snapshot) for convenience
     reg = MetricsRegistry()
     kind = reg.get_kind(model)
 
@@ -69,9 +63,7 @@ def generate_html_report(
         hist = reg.get_history_days(model)
         df = loader.fetch_time_series(model, lookback_days=hist)
     else:
-        # snapshot: no date filter, just grab the table
         hist = 0
-        # requires MetricsLoader.fetch_snapshot(model) to exist
         df = loader.fetch_snapshot(model)
 
     data_dir = out_root / data_subdir
@@ -79,7 +71,6 @@ def generate_html_report(
     data_path = data_dir / f"{model}.csv"
     df.to_csv(data_path, index=False)
 
-    # 4) Render HTML
     html_path = render_html_report(
         model=model,
         narrative_markdown=narrative,

@@ -1,17 +1,23 @@
-# Report Agent (code-interpreter)
+# Report Agent
 
-Concise, modular system to generate **weekly data reports** directly from ClickHouse + dbt docs using OpenAI’s **Code Interpreter** (python tool). The model receives **raw tables** (CSV) plus neutral context (schema, meta, optional dbt docs), then decides how to analyze, visualize, and summarize — **no precomputed metrics**. The run produces a **self-contained HTML report** with a BD-friendly narrative and plots.
+![Report Agent](img/report-agent-header.svg)
+
+Concise, modular system to generate **weekly data reports** directly from ClickHouse + dbt docs using OpenAI’s **Code Interpreter** (Python tool).
+
+The model receives **raw tables** (CSV) plus neutral context (schema, meta, optional dbt docs), then decides how to analyze, visualize, and summarize — **no precomputed metrics**. Each run produces:
+
+* Per-metric HTML reports with BD-friendly narrative and plots.
+* An optional portfolio summary HTML that highlights the most important metrics.
 
 ---
 
 ## Key Features
 
-- **Free-form analysis**: model runs Python in a sandbox (Responses API + `code_interpreter`), no fixed toolchain.
-- **Raw, long-format input**: supports multiple rows per `date` (e.g., `date, metric, label, value`).
-- **Neutral context**: attaches `*.schema.json` (dtypes/examples), `*.meta.json` (coverage/columns), and optional `*.docs.md`.
-- **Evidence-first visuals**: plots are required to visualize the headline & highlights (weekly total + WoW movers).
-- **HTML output**: renders narrative + plot gallery into a portable static HTML page.
-- **Safe defaults**: read-only SQL; no network in sandbox; plots saved to a writable relative `plots/` folder.
+* **Free-form analysis**: Model runs Python in a sandbox (Responses API + `code_interpreter`), no fixed toolchain.
+* **Raw inputs**: Time series (date, value, optional label) and snapshots (value, optional change_pct, optional label).
+* **Neutral context**: Attaches `*.schema.json` (dtypes/examples/roles), `*.meta.json` (coverage/kind), and optional `*.docs.md`.
+* **Evidence-first visuals**: Weekly total + WoW movers plots required by the prompt for time series.
+* **Static HTML**: Dark-themed per-metric pages + a summary page, all assets referenced via relative paths.
 
 ---
 
@@ -19,55 +25,77 @@ Concise, modular system to generate **weekly data reports** directly from ClickH
 
 ```
 report_agent/
-  analysis/
-    agent_tools.py
-    analyzer.py
-    metrics_loader.py        # fetch raw rows from ClickHouse (no aggregation)
-    metrics_registry.py      # reads configs/metrics.yml (history window)
-    thresholds.py
-  configs/
-    metrics.yml              # metric list + history days
+  cli/
+    main.py                       # CLI entrypoint (installed as `report-agent`)
+
   connectors/
-    clickhouse_connector.py  # read-only client
-    llm_connector/
-      base.py
-      code_interpreter.py    # Responses API: mounts CSV/schema/meta/docs in container,
-                             # runs analysis, captures citations, download_artifacts()
-      openai.py
+    db/
+      clickhouse_connector.py     # read-only ClickHouse client
+    llm/
+      base.py                     # abstract LLMConnector
+      openai.py                   # OpenAICodeInterpreterConnector (Responses API + CI)
+
+  metrics/
+    metrics.yml                   # metric list + kind + history_days
+    metrics_loader.py             # fetch_time_series() and fetch_snapshot()
+    metrics_registry.py           # loads metrics.yml, helpers (list_models, get_kind, etc.)
+
   dbt_context/
-    from_docs_json.py        # optional dbt manifest/catalog ingestion
+    from_docs_json.py             # optional dbt manifest/docs ingestion
+
   nlg/
-    prompt_builder.py        # builds interpreter prompt
-    html_report.py           # render self-contained HTML report
-    report_service.py        # one-shot: run -> download plots -> save CSV -> HTML
+    prompt_builder.py             # builds CI prompts (time_series vs snapshot)
+    html_report.py                # render per-metric HTML
+    report_service.py             # run CI -> download plots -> save CSV/text -> HTML
+    summary_service.py            # cross-metric portfolio summary (2–4 highlighted metrics)
     templates/
-      ci_report_prompt.j2    # BD-style prompt (no process talk; headline + sections; required plots)
-      report_page.html.j2    # HTML page template (dark theme, gallery)
+      ci_report_prompt.j2         # time-series CI prompt (weekly report + required plots)
+      ci_snapshot_prompt.j2       # snapshot CI prompt (single KPI)
+      weekly_report_prompt.j2     # legacy prompt (not used by CLI)
+      report_page.html.j2         # per-metric HTML template (dark theme)
+      summary_prompt.j2           # portfolio summary LLM prompt
+      summary_page.html.j2        # portfolio summary HTML template
+
   utils/
-    config_loader.py         # loads .env and config
+    config_loader.py              # loads .env and returns config dict
 ```
 
-_Output structure after a run:_
+**Output structure after a run (default `reports/`):**
+
 ```
 reports/
-  YYYY-MM-DD_<model>.html
+  2025-11-26_api_p2p_discv4_clients_daily.html
+  2025-11-26_api_execution_transactions_active_accounts_7d.html
+  portfolio_summary.html
+
   plots/
-    <model>_headline_weekly.png
-    <model>_top5_wow.png
-    ... (any additional cfile_*.png created)
+    api_p2p_discv4_clients_daily_headline_weekly.png
+    api_p2p_discv4_clients_daily_top5_wow.png
+    ...
+
   data/
-    <model>.csv
+    api_p2p_discv4_clients_daily.csv
+    api_execution_transactions_active_accounts_7d.csv
+
+  text/
+    api_p2p_discv4_clients_daily.txt
+    api_execution_transactions_active_accounts_7d.txt
 ```
 
 ---
 
 ## Requirements
 
-- Python 3.10+
-- `pip install -r requirements.txt`
-  - Recent OpenAI SDK (`openai>=1.40.0`)
-  - `httpx` (container file downloads)
-  - `markdown` (HTML narrative)
+* Python 3.10+
+* Install package (from repo root):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e .
+```
+
+Dependencies (via `pyproject.toml`) include: `openai`, `clickhouse-connect`, `jinja2`, `markdown`, `httpx`, `pandas`, etc.
 
 ---
 
@@ -75,102 +103,116 @@ reports/
 
 Set credentials in `.env` (loaded by `utils/config_loader.py`):
 
-```
+```bash
 # OpenAI
 OPENAI_API_KEY=...
 
+# Optional overrides
+# OPENAI_MODEL=gpt-4.1
+# OPENAI_SUMMARY_MODEL=gpt-4.1-mini
+
 # ClickHouse
 CLICKHOUSE_HOST=...
-CLICKHOUSE_PORT=...
 CLICKHOUSE_USER=...
 CLICKHOUSE_PASSWORD=...
-CLICKHOUSE_DATABASE=...
+CLICKHOUSE_DB_READ=dbt
+CLICKHOUSE_DB_WRITE=playground_max
+CLICKHOUSE_SECURE=true
 
-# dbt docs (optional)
-DBT_MANIFEST_URL=...
-DBT_CATALOG_URL=...
+# dbt docs / manifest (optional)
+DBT_MANIFEST_PATH=/path/to/manifest.json
+# or
+# DBT_DOCS_BASE_URL=https://your-dbt-docs-root/
 
-# Custom base (optional; e.g., Azure)
+# Custom base (optional; e.g., Azure/OpenAI-compatible)
 # OPENAI_BASE_URL=https://.../v1
 ```
 
-Define metrics in `report_agent/configs/metrics.yml` (history only):
+Define metrics in `report_agent/metrics/metrics.yml`:
 
 ```yaml
 metrics:
+  # Time-series with optional label dimension
   - model: api_p2p_discv4_clients_daily
+    kind: time_series
     history_days: 180
+
+  - model: api_execution_transactions_active_accounts_by_sector_daily
+    kind: time_series
+    history_days: 180
+
+  # Snapshot / number display
+  - model: api_execution_transactions_active_accounts_7d
+    kind: snapshot
 ```
 
-> **Conventions:** Every table has a `date` column. Multiple rows per `date` are allowed (long format).
+**Conventions:**
+* `kind: time_series`: table has a date column; value is the main measure; label (if present) is a dimension.
+* `kind: snapshot`: no date required; typically value, optional change_pct, optional label.
 
 ---
 
 ## How It Works
 
-1. **Load configs** → find metric + `history_days`.
-2. **Fetch raw rows** from ClickHouse; no precompute, no pivot.
-3. **Create files**:
-   - `{model}.csv` (raw rows)
-   - `{model}.schema.json` (dtype flags + examples)
-   - `{model}.meta.json` (row/col counts, date coverage, columns, history_days)
-   - `{model}.docs.md` (optional dbt docs)
-4. **Start a `code_interpreter` container** with `file_ids` mounted.
-5. **Model executes Python**:
-   - infers roles, analyzes weekly trends/segments,
-   - creates two **headline plots**:
-     - weekly total with last two weeks highlighted + WoW annotation
-     - WoW top movers by segment (grouped bars, top 5 by abs. change)
-   - saves plots to `plots/` and **displays** them (so they’re cited).
-6. **Artifacts**:
-   - Parse citations → `container_id` + `file_id` for each plot.
-   - `download_artifacts()` pulls images to `reports/plots/`.
-7. **HTML report**:
-   - `render_html_report()` or `generate_html_report()` combines narrative + gallery,
-   - links data CSV; all asset paths are relative for local viewing.
+1.  **CLI loads config + registry**: `report-agent` uses `load_configs()` and `MetricsRegistry` to discover metrics, kinds, and history windows.
+2.  **Fetch data from ClickHouse**:
+    * Time series: `fetch_time_series(model, lookback_days)` queries by `date >= today() - INTERVAL ...`.
+    * Snapshots: `fetch_snapshot(model)` selects the whole table (no date filter).
+3.  **Prepare CI inputs**: For each metric, the connector writes:
+    * `{model}.csv` — raw rows
+    * `{model}.schema.json` — dtypes + sample values + simple roles (time/measure/dimension/delta)
+    * `{model}.meta.json` — counts, (optional) date range, kind
+    * `{model}.docs.md` — dbt model + column docs (if available)
+4.  **Run Code Interpreter**:
+    * Files uploaded to OpenAI as container files.
+    * `build_ci_prompt()` selects the correct prompt template (time series vs snapshot).
+    * Responses API runs with `code_interpreter` and returns a BD-facing narrative.
+5.  **Persist outputs**:
+    * Narrative → `reports/text/<model>.txt`
+    * Plots → downloaded via `download_artifacts()` into `reports/plots/`
+    * Data → `reports/data/<model>.csv`
+    * Per-metric HTML → `html_report.render_html_report()` writes `YYYY-MM-DD_<model>.html`
+6.  **Portfolio summary (optional)**:
+    * Uses `summary_service.generate_portfolio_summary()` on the collected metric texts + dbt docs.
+    * LLM picks 2–4 key metrics and writes a portfolio-level summary.
 
 ---
 
-## Quick Start (concise)
+## Quick Start
 
-1. `pip install -r requirements.txt` and set `.env`
-2. Add your model to `configs/metrics.yml`
-3. Run:
-
-```python
-from report_agent.connectors.llm_connector.code_interpreter import CodeInterpreterConnector
-from report_agent.nlg.report_service import generate_html_report
-import os
-
-ci = CodeInterpreterConnector(api_key=os.getenv("OPENAI_API_KEY"), model_name="gpt-4.1")
-print("Saved:", generate_html_report("api_p2p_discv4_clients_daily", ci, out_dir="reports"))
-```
-
----
-
-## Best Practices
-
-- **History window**: ≥180 days recommended for robust trends.
-- **Deterministic plot names**: template nudges `<model>_headline_weekly.png` and `<model>_top5_wow.png`.
-- **Container lifetime**: download artifacts right after a run (containers expire quickly).
+1.  Install and configure:
+    ```bash
+    pip install -e .
+    # create and fill .env
+    ```
+2.  Define metrics in `report_agent/metrics/metrics.yml`.
+3.  Run all metrics + summary:
+    ```bash
+    report-agent
+    ```
+4.  Or just one metric:
+    ```bash
+    report-agent --metric api_p2p_discv4_clients_daily
+    ```
+5.  Or change output directory / skip summary:
+    ```bash
+    report-agent --out-dir gnosis_reports --no-summary
+    ```
 
 ---
 
 ## Troubleshooting
 
-- **attachments error**: don’t use `attachments=`; mount files via `tools[0].container.file_ids`.
-- **Missing `tools[0].container`**: include `{"type":"code_interpreter","container":{"type":"auto"}}`.
-- **“.pdf only” error**: don’t pass `input_file` items for CSV/PNG; use container `file_ids`.
-- **Plots not visible in HTML**: ensure downloads to `reports/plots/`; paths are relative in the page.
-- **No data returned**: check ClickHouse creds/table and `history_days`.
+* **ClickHouse UNKNOWN_IDENTIFIER date**: Mark snapshot tables as `kind: snapshot` in `metrics.yml` so they don’t get a `WHERE date` filter.
+* **Plots not visible in HTML**: Check that PNGs exist in `reports/plots/` and that you open the HTML from the same directory tree (paths are relative).
+* **No portfolio summary**: Ensure you didn’t pass `--no-summary` and that at least one metric completed successfully.
 
 ---
 
 ## Roadmap (short)
 
-- Multi-metric bundle in one HTML
-- Scheduled runs + Slack/Email delivery
-- Lightweight evaluation hooks (consistency checks on numbers in narrative).
-- Onchain context
-
----
+* More metric kinds and templates (e.g. funnels, distributions).
+* Slack / email delivery on schedule.
+* Lightweight consistency checks between narrative and numbers.
+* Support for additional LLM providers (e.g. Gemini) behind the same connector interface.
+* Better Frontend
