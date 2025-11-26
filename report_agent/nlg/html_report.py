@@ -53,15 +53,12 @@ def render_html_report(
     out_dir_p = Path(out_dir).resolve()
     out_dir_p.mkdir(parents=True, exist_ok=True)
 
-    # Normalize narrative
     narrative_html = _md_to_html(narrative_markdown)
 
-    # Normalize asset paths to be relative to the HTML location
     rel_images = []
     for p in (image_paths or []):
         p_path = Path(p)
         if not p_path.exists():
-            # Skip missing files silently; the report should still render
             continue
         rel_images.append(_to_posix_relpath(p_path, out_dir_p))
 
@@ -71,7 +68,6 @@ def render_html_report(
         if csv_path.exists():
             rel_csv = _to_posix_relpath(csv_path, out_dir_p)
 
-    # Render template
     template = _env.get_template("report_page.html.j2")
     now = datetime.now()
     html = template.render(

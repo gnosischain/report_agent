@@ -55,7 +55,6 @@
     }
     .narrative :is(h1,h2,h3){ margin-top: 1.2em; }
 
-    /* small tweaks for summary page */
     .metric-title { margin-top: 0; font-size: 16px; }
     .metric-link { font-size: 12px; color: var(--muted); margin-top: 4px; }
   </style>
@@ -84,8 +83,10 @@
           {% for metric in highlighted_metrics %}
             <figure>
               <h3 class="metric-title">{{ metric }}</h3>
-              <img class="plot" src="plots/{{ metric }}_headline_weekly.png" alt="{{ metric }} headline weekly chart" />
-              <img class="plot" src="plots/{{ metric }}_top5_wow.png" alt="{{ metric }} top 5 WoW movers chart" />
+              {% set imgs = plots_by_metric.get(metric, []) %}
+              {% for img in imgs %}
+                <img class="plot" src="{{ img }}" alt="{{ metric }} plot {{ loop.index }}" />
+              {% endfor %}
               <figcaption class="metric-link">
                 Full report:
                 {% for m, html_name in per_metric_reports %}

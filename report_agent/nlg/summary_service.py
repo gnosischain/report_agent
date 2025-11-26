@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 from importlib.resources import files
 from jinja2 import Environment, FileSystemLoader
 from openai import OpenAI
-import markdown  
+import markdown
 
 from report_agent.dbt_context.from_docs_json import (
     load_manifest,
@@ -23,7 +23,7 @@ _env = Environment(loader=FileSystemLoader(str(_template_dir)), autoescape=True)
 @dataclass
 class MetricDoc:
     description: str
-    columns: Dict[str, Dict[str, str]]  
+    columns: Dict[str, Dict[str, str]]  # col -> {data_type, description}
 
 
 def _load_metric_texts(metric_reports: List[Tuple[str, Path]], out_dir: Path) -> Dict[str, str]:
@@ -122,10 +122,55 @@ def _strip_highlight_header(output: str) -> str:
     return "\n".join(lines)
 
 
+def _to_posix_relpath(p: Path, start: Path) -> str:
+    """
+    Return a browser-friendly (POSIX) relative path from start -> p.
+    Works across drives (falls back to relpath).
+    """
+    p = p.resolve()
+    start = start.resolve()
+    try:
+        rel = p.relative_to(start)
+    except Exception:
+        import os
+        rel = Path(os.path.relpath(p, start))
+    return rel.as_posix()
+
+
+def _collect_plots_for_metrics(
+    metrics: List[str],
+    out_root: Path,
+) -> Dict[str, List[str]]:
+    """
+    Read per-metric plot lists from out_root/plots_index/<metric>.txt.
+
+    Each index file contains one path per line (as written by generate_html_report).
+    We normalize each path to be browser-friendly and relative to out_root (reports/).
+    """
+    plots_index_dir = out_root / "plots_index"
+    plots_by_metric: Dict[str, List[str]] = {}
+
+    for metric in metrics:
+        paths: List[str] = []
+        idx_path = plots_index_dir / f"{metric}.txt"
+        if idx_path.exists():
+            for line in idx_path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                p = Path(line)
+                if p.exists():
+                    paths.append(_to_posix_relpath(p, out_root))
+        plots_by_metric[metric] = paths
+
+    return plots_by_metric
+
+
 def _render_summary_page(
     summary_html: str,
     highlighted_metrics: List[str],
     per_metric_reports: List[Tuple[str, Path]],
+    plots_by_metric: Dict[str, List[str]],
     out_path: Path,
 ) -> Path:
     """
@@ -134,12 +179,14 @@ def _render_summary_page(
     """
     tpl = _env.get_template("summary_page.html.j2")
 
+    # Map metric -> html filename (relative)
     per_metric_rel = [(m, p.name) for m, p in per_metric_reports]
 
     html = tpl.render(
         summary_html=summary_html,
         highlighted_metrics=highlighted_metrics,
         per_metric_reports=per_metric_rel,
+        plots_by_metric=plots_by_metric,
     )
     out_path.write_text(html, encoding="utf-8")
     return out_path
@@ -160,18 +207,14 @@ def generate_portfolio_summary(
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    # 1) Load per-metric report texts (from reports/text/<metric>.txt)
     metric_texts = _load_metric_texts(metric_reports, out_root)
     if not metric_texts:
         raise ValueError("No metric report texts found; cannot build portfolio summary.")
 
-    # 2) Load dbt docs for these metrics
     metric_docs = _load_metric_docs(list(metric_texts.keys()))
 
-    # 3) Build the summary prompt
     prompt = _build_summary_prompt(metric_texts, metric_docs)
 
-    # 4) Call LLM (plain chat, no code interpreter needed)
     cfg = load_configs()
     api_key = cfg["llm"]["api_key"]
     model_name = cfg["llm"].get("summary_model") or cfg["llm"]["model"]
@@ -187,18 +230,18 @@ def generate_portfolio_summary(
     )
     full_output = resp.choices[0].message.content or ""
 
-    # 5) Parse highlighted metrics and clean body (Markdown)
     highlighted = _parse_highlighted_metrics(full_output)
     summary_markdown = _strip_highlight_header(full_output)
 
-    # 5b) Convert Markdown -> HTML for rendering
     summary_html = markdown.markdown(summary_markdown, extensions=["extra"])
 
-    # 6) Render summary HTML page
+    plots_by_metric = _collect_plots_for_metrics(highlighted, out_root)
+
     summary_path = out_root / "portfolio_summary.html"
     return _render_summary_page(
         summary_html=summary_html,
         highlighted_metrics=highlighted,
         per_metric_reports=metric_reports,
+        plots_by_metric=plots_by_metric,
         out_path=summary_path,
     )
