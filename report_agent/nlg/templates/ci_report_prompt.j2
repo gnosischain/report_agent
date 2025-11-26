@@ -3,15 +3,27 @@ and you MUST actually use the python tool to run code. Perform any verification
 (loading data, dtypes, head, etc.) **silently** and do **not** include logs,
 intermediate prints, or step-by-step explanations in your final message.
 
+This dataset is a **time-series metric** with optional segment/dimension columns.
+
 ## Files provided
 - {{ csv_filename }}  (raw rows, last {{ history_days }} days; may have multiple rows per date)
 - {{ schema_filename }}  (JSON schema with dtype hints & small example values)
-- {{ meta_filename }}    (counts, date coverage, columns)
+- {{ meta_filename }}    (counts, date coverage, columns; includes a `kind` field)
 {% if docs_filename %}- {{ docs_filename }}    (dbt docs: model + column descriptions, if available){% endif %}
+
+Column conventions (from schema + dbt docs):
+- A column named `date` is the **time axis**.
+- A column named `value` is the **main numeric measure**.
+- A column named `label` is a **segment / dimension label** (e.g. sector, project);
+  do **not** treat `label` as a numeric metric.
+- A column with role "delta" (e.g. `change_pct`) is a change vs previous period.
+- Use the `role` hints in the schema (time / measure / dimension / delta) together
+  with dbt docs to decide how to interpret columns.
 
 ## What to do (analysis checklist — do not include this in the final message)
 1) Load the CSV into a DataFrame `df`. Parse `df["date"] = pd.to_datetime(df["date"], errors="coerce")`.
-2) Expect **multiple rows per date** (long format). Decide column roles (time/value/segments). Pivot or groupby as needed.
+2) Expect **multiple rows per date** (long format). Decide column roles (time/value/segments).
+   - Aggregate as needed: e.g., sum `value` by date (and label if segmentation is useful).
 3) Handle missing values/type coercions explicitly.
 4) Analyze for a *weekly* report:
    - Compare the most recent 7 days to the prior 7 days.
@@ -22,7 +34,7 @@ intermediate prints, or step-by-step explanations in your final message.
 Create and **display** two figures that directly support the executive summary:
 
 **Figure 1 — Headline weekly total trend (last ~8–12 weeks)**
-- What: total (all segments) aggregated to weekly.
+- What: total (all segments) aggregated to weekly using the main `value` measure.
 - Highlight: clearly highlight the **last two weeks** (e.g., shaded span or distinct markers).
 - Annotate on the chart the WoW delta (absolute and %), e.g., “+72 (+8.2% WoW)”.
 - Title: “{{ model }} — Weekly total (headline)” and a subtitle with the key number(s).
@@ -34,6 +46,7 @@ Create and **display** two figures that directly support the executive summary:
 - Sort: by absolute change descending (largest mover first).
 - Title: “{{ model }} — Top 5 movers (WoW)”.
 - Save to `plots/{{ model }}_top5_wow.png`, then also display it so it’s cited.
+- If there is no `label` / segment dimension, skip this figure.
 
 Implementation notes:
 - Use clear axis labels, readable font sizes, and adequate figure size.
@@ -41,14 +54,17 @@ Implementation notes:
 - `import os; os.makedirs("plots", exist_ok=True)` before saving.
 
 ## Final deliverable (this is the ONLY thing you should output)
-- **Executive summary (one sentence, no first-person):** Start with one of {Significant increase, Significant decrease, Stable, Mixed} and state the key number(s) with WoW % in plain language.
+- **Executive summary (one sentence, no first-person):** Start with one of
+  {Significant increase, Significant decrease, Stable, Mixed} and state the key
+  number(s) with WoW % in plain language.
 - Then a concise BD-facing summary (≈150–300 words), with sections:
   - **Highlights** — 3–5 bullets on what changed and why (plain language).
   - **Key numbers** — totals and WoW deltas (absolute + %), top movers.
   - **Drivers & notes** — brief bullets (segments, timing, anomalies, caveats).
   - **Outlook / Watch next week** — 2–3 bullets (actionable).
 - Do **not** include code, logs, or “first I did X” narration.
-- Do **not** include file paths in the text; refer generically to the “headline trend” and “movers chart”.
+- Do **not** include file paths in the text; refer generically to the “headline trend”
+  and “movers chart”.
 
 ## Guardrails
 - Allowed imports: pandas, numpy, matplotlib (others only if already available).

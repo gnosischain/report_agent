@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Weekly Portfolio Summary</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b0d12; --fg:#e7edf3; --muted:#aab7c7; --card:#121722; --accent:#7aa2ff; }
+    * { box-sizing: border-box; }
+    body {
+      margin:0;
+      background:var(--bg);
+      color:var(--fg);
+      font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji";
+    }
+    header {
+      padding: 24px 20px;
+      border-bottom: 1px solid #1c2432;
+      background: linear-gradient(180deg, #101522, #0b0d12);
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
+    h1 { margin: 0 0 6px; font-size: 22px; }
+    .meta { color: var(--muted); font-size: 13px; }
+    .card {
+      background: var(--card);
+      border: 1px solid #1e2636;
+      border-radius: 12px;
+      padding: 18px;
+      margin: 16px 0;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+    img.plot {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 10px;
+      border: 1px solid #1e2636;
+      background:#0e131d;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    pre, code {
+      background: #0e131d;
+      border:1px solid #1e2636;
+      padding: .6em .8em;
+      border-radius: 8px;
+      overflow:auto;
+    }
+    .section-title {
+      margin: 8px 0 6px;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+    }
+    .narrative :is(h1,h2,h3){ margin-top: 1.2em; }
+
+    .metric-title { margin-top: 0; font-size: 16px; }
+    .metric-link { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Weekly Portfolio Summary</h1>
+      <div class="meta">
+        Portfolio view over all tracked metrics
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- Summary narrative -->
+    <section class="card narrative">
+      {{ summary_html | safe }}
+    </section>
+
+    {% if highlighted_metrics %}
+      <!-- Key charts for highlighted metrics -->
+      <section class="card">
+        <div class="section-title">Key charts for highlighted metrics</div>
+        <div class="grid">
+          {% for metric in highlighted_metrics %}
+            <figure>
+              <h3 class="metric-title">{{ metric }}</h3>
+              {% set imgs = plots_by_metric.get(metric, []) %}
+              {% for img in imgs %}
+                <img class="plot" src="{{ img }}" alt="{{ metric }} plot {{ loop.index }}" />
+              {% endfor %}
+              <figcaption class="metric-link">
+                Full report:
+                {% for m, html_name in per_metric_reports %}
+                  {% if m == metric %}
+                    <a href="{{ html_name }}">{{ html_name }}</a>
+                  {% endif %}
+                {% endfor %}
+              </figcaption>
+            </figure>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    <!-- All per-metric reports -->
+    <section class="card">
+      <div class="section-title">All per-metric reports</div>
+      <ul>
+        {% for metric, html_name in per_metric_reports %}
+          <li><a href="{{ html_name }}">{{ metric }}</a></li>
+        {% endfor %}
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

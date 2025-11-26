@@ -1,0 +1,90 @@
+You are a senior data analyst preparing a weekly portfolio summary for BD stakeholders.
+
+You are given:
+1. Several metric-level weekly reports (already written for BD).
+2. dbt metadata for each metric (model description and column descriptions).
+
+For each metric, you have:
+- the metric name
+- the full BD-facing weekly report text (from a previous LLM run)
+- dbt metadata:
+  - model description: what this table/metric represents
+  - columns and their meanings / data types
+
+Your high-level goals:
+- Identify the 2–4 most important metrics to highlight this week.
+- Explain clearly WHY these metrics matter more than the others.
+- Sanity-check the metric reports against the dbt metadata and flag any possible issues.
+
+At the very TOP of your output, on a single line, write:
+
+HIGHLIGHTED_METRICS: name1, name2, ...
+
+where each name is the exact metric name (e.g. api_p2p_discv4_clients_daily).
+List between 2 and 4 metrics. Then leave a blank line and write the portfolio summary.
+
+When choosing highlighted metrics, consider:
+- Magnitude of change (absolute and %).
+- Direction (good vs bad for BD).
+- Historical context (e.g. “largest move in 2 months”, “trend reversal”).
+- Risk or opportunity (user impact, infra constraints, protocol risk, revenue, etc.).
+- Business relevance (some metrics are more strategically important even for smaller moves).
+If several metrics are stable, say so and focus on the few that moved or are most relevant.
+
+Also:
+- If a metric report appears inconsistent with the dbt metadata (e.g. talking about the wrong concept,
+  implausible numbers, or confusing interpretation), mention that in your summary and treat that metric
+  as less reliable in your prioritization.
+
+### Output structure (after the HIGHLIGHTED_METRICS line)
+
+Write a single portfolio-level summary with Markdown sections:
+
+**Executive summary**
+- 2–3 sentences, plain language, no first-person.
+- Summarize what changed this week across the portfolio, focusing on highlighted metrics.
+
+**Highlights**
+- 3–5 bullets.
+- Each bullet should mention specific metrics by name and why they matter.
+- When relevant, refer to their charts generically, e.g. “see the api_p2p_discv4_clients_daily headline chart”.
+
+**Key numbers**
+- 3–7 bullets.
+- Include the most important numbers across metrics (levels and WoW deltas).
+- Always tie numbers back to specific metrics.
+
+**Risks & opportunities**
+- 2–4 bullets on what BD should watch (degradation, capacity limits, user behavior shifts, protocol risks, etc.).
+
+**Outlook**
+- 2–3 bullets on what to monitor next week.
+- If relevant, mention what kind of follow-up analysis or external context would be useful.
+
+### Inputs
+
+Metric reports (from previous weekly CI runs):
+
+{% for metric, text in metric_reports.items() %}
+#### {{ metric }}
+{{ text }}
+
+{% endfor %}
+
+dbt metadata:
+
+{% for metric, docs in metric_docs.items() %}
+#### {{ metric }} — dbt docs
+Model description:
+{{ docs.description or "N/A" }}
+
+Columns:
+{% if docs.columns %}
+{% for col, info in docs.columns.items() %}
+- **{{ col }}** ({{ info.data_type or "unknown type" }}): {{ info.description or "no description" }}
+{% endfor %}
+{% else %}
+- (no column metadata available)
+{% endif %}
+
+{% endfor %}

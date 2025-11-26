@@ -1,9 +1,12 @@
 from jinja2 import Environment, FileSystemLoader
 from report_agent.dbt_context.from_docs_json import load_manifest, get_model_node, get_column_metadata
 from report_agent.utils.config_loader import load_configs
+from importlib.resources import files
+
+template_dir = files("report_agent.nlg") / "templates"
 
 env = Environment(
-    loader=FileSystemLoader(searchpath="report_agent/nlg/templates"),
+    loader=FileSystemLoader(str(template_dir)),
     autoescape=True,
 )
 
@@ -40,14 +43,28 @@ def build_ci_prompt(
     csv_filename: str,
     schema_filename: str,
     meta_filename: str,
-    docs_filename: str = None
+    docs_filename: str = None,
+    kind: str = "time_series",
 ) -> str:
-    template = env.get_template("ci_report_prompt.j2")
+    """
+    Build the CI prompt for a given model.
+
+    kind:
+      - "time_series": weekly trend analysis with plots
+      - "snapshot":    one-off KPI snapshot (value + change_pct, etc.)
+    """
+    if kind == "snapshot":
+        template_name = "ci_snapshot_prompt.j2"
+    else:
+        template_name = "ci_report_prompt.j2"
+
+    template = env.get_template(template_name)
     return template.render(
-        model=model,                     # <-- add this
+        model=model,
         history_days=history_days,
         csv_filename=csv_filename,
         schema_filename=schema_filename,
         meta_filename=meta_filename,
         docs_filename=docs_filename,
+        kind=kind,
     )

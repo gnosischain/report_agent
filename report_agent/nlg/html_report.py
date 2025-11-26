@@ -1,7 +1,7 @@
-# report_agent/nlg/html_report.py
 from datetime import datetime
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from importlib.resources import files
 
 try:
     import markdown as _md
@@ -9,8 +9,10 @@ try:
 except Exception:
     _MD_ENABLED = False
 
+template_dir = files("report_agent.nlg") / "templates"
+
 _env = Environment(
-    loader=FileSystemLoader("report_agent/nlg/templates"),
+    loader=FileSystemLoader(str(template_dir)),
     autoescape=select_autoescape(["html", "xml"]),
 )
 
@@ -18,9 +20,7 @@ def _md_to_html(text: str) -> str:
     if not text:
         return ""
     if _MD_ENABLED:
-        # fenced code + tables are useful for our reports
         return _md.markdown(text, extensions=["extra", "tables", "fenced_code"])
-    # fallback: minimal escaping inside <pre>
     import html as _html
     return f"<pre>{_html.escape(text)}</pre>"
 
@@ -53,15 +53,12 @@ def render_html_report(
     out_dir_p = Path(out_dir).resolve()
     out_dir_p.mkdir(parents=True, exist_ok=True)
 
-    # Normalize narrative
     narrative_html = _md_to_html(narrative_markdown)
 
-    # Normalize asset paths to be relative to the HTML location
     rel_images = []
     for p in (image_paths or []):
         p_path = Path(p)
         if not p_path.exists():
-            # Skip missing files silently; the report should still render
             continue
         rel_images.append(_to_posix_relpath(p_path, out_dir_p))
 
@@ -71,7 +68,6 @@ def render_html_report(
         if csv_path.exists():
             rel_csv = _to_posix_relpath(csv_path, out_dir_p)
 
-    # Render template
     template = _env.get_template("report_page.html.j2")
     now = datetime.now()
     html = template.render(

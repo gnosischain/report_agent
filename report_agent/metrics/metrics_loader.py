@@ -1,5 +1,5 @@
-from report_agent.connectors.clickhouse_connector import ClickHouseConnector
-from report_agent.analysis.metrics_registry import MetricsRegistry
+from report_agent.connectors.db.clickhouse_connector import ClickHouseConnector
+from report_agent.metrics.metrics_registry import MetricsRegistry
 
 class MetricsLoader:
     def __init__(self):
@@ -24,5 +24,16 @@ class MetricsLoader:
             FROM {self.db.read.database}.{model}
             WHERE `{time_col}` >= today() - INTERVAL {days} DAY
             ORDER BY `{time_col}` ASC
+        """
+        return self.db.fetch_df(sql)
+
+    def fetch_snapshot(self, model: str):
+        """
+        Fetch a snapshot metric table (no date filter).
+        Used for metrics with kind: snapshot in metrics.yml.
+        """
+        sql = f"""
+            SELECT *
+            FROM dbt.{model}
         """
         return self.db.fetch_df(sql)
