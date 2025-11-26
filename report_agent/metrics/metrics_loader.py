@@ -26,3 +26,14 @@ class MetricsLoader:
             ORDER BY `{time_col}` ASC
         """
         return self.db.fetch_df(sql)
+
+    def fetch_snapshot(self, model: str):
+        """
+        Fetch a snapshot metric table (no date filter).
+        Used for metrics with kind: snapshot in metrics.yml.
+        """
+        sql = f"""
+            SELECT *
+            FROM dbt.{model}
+        """
+        return self.db.fetch_df(sql)

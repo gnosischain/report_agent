@@ -43,3 +43,11 @@ class MetricsRegistry:
     def get_history_days(self, model: str) -> int:
         cfg = self.get(model)
         return int(cfg.get("history_days", DEFAULT_HISTORY_DAYS))
+    
+    def get_kind(self, model: str) -> str:
+        """
+        Return the metric kind, defaulting to 'time_series' if not specified.
+        Valid kinds currently: 'time_series', 'snapshot'.
+        """
+        cfg = self.get(model)
+        return cfg.get("kind", "time_series")

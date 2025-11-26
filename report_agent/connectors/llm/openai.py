@@ -1,3 +1,4 @@
+# report_agent/connectors/llm/openai.py
 from __future__ import annotations
 
 import json
@@ -41,11 +42,20 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         self.tools = [{"type": "code_interpreter", "container": {"type": "auto"}}]
         self._last_artifacts: Optional[dict] = None
 
+    # ---- Tools API (no-op here) ----
+
     def register_tools(self, functions):
+        # No JSON function-calling tools in this connector; code interpreter only.
         self.tools = [{"type": "code_interpreter", "container": {"type": "auto"}}]
 
+    # ---- Helpers ----
 
     def _df_to_schema_json(self, df: pd.DataFrame) -> dict:
+        """
+        Build a lightweight schema description for the dataframe, including
+        simple role hints that the LLM can use to interpret columns.
+        """
+
         def is_datetime(s: pd.Series) -> bool:
             return pd.api.types.is_datetime64_any_dtype(s) or s.name == "date"
 
@@ -56,66 +66,121 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         for col in df.columns:
             s = df[col]
             ex = s.dropna().astype(str).unique()[:3].tolist()
+
+            # Simple role hints for the LLM
+            role = "other"
+            if col == "date":
+                role = "time"
+            elif col == "label":
+                role = "dimension"
+            elif col == "value":
+                role = "measure"
+            elif col == "change_pct":
+                role = "delta"
+
             schema[col] = {
                 "dtype": str(s.dtype),
                 "is_datetime": bool(is_datetime(s)),
                 "is_numeric": bool(is_numeric(s)),
                 "examples": ex,
+                "role": role,
             }
         return schema
 
     # ---- Public API expected by callers ----
 
     def run_report(self, model_name: str, lookback_days: int | None = None) -> str:
+        """
+        High-level entrypoint used by the CLI / report_service.
+
+        - Looks up metric kind (time_series vs snapshot).
+        - Fetches the appropriate data slice.
+        - Writes CSV/schema/meta/docs to a temp dir.
+        - Invokes the Responses API with code_interpreter.
+        - Returns the final narrative text.
+        """
+        # 1) Load configs/registry and fetch raw data
         cfg = load_configs()
         registry = MetricsRegistry()
         loader = MetricsLoader()
-        history = int(lookback_days or registry.get_history_days(model_name))
 
-        df = loader.fetch_time_series(model_name, lookback_days=history)
+        kind = registry.get_kind(model_name)  # "time_series" or "snapshot"
+
+        if kind == "time_series":
+            history = int(lookback_days or registry.get_history_days(model_name))
+            df = loader.fetch_time_series(model_name, lookback_days=history)
+        else:
+            # Snapshots: ignore lookback_days/history; just fetch the snapshot table
+            history = 0
+            # You will add this method to MetricsLoader (see below)
+            df = loader.fetch_snapshot(model_name)
+
         if df is None or df.empty:
-            return f"No data returned for model '{model_name}' in the last {history} days."
+            return f"No data returned for model '{model_name}'"
 
-        if "date" not in df.columns:
+        # For time series, we require a date column; for snapshots we allow tables without date
+        if kind == "time_series" and "date" not in df.columns:
             return f"Model '{model_name}' has no 'date' column; cannot proceed."
 
+        # 2) Prepare files (CSV + schema + meta + optional docs)
         tmpdir = tempfile.mkdtemp(prefix=f"{model_name.replace('.', '_')}_")
         csv_path = os.path.join(tmpdir, f"{model_name}.csv")
         schema_path = os.path.join(tmpdir, f"{model_name}.schema.json")
         meta_path = os.path.join(tmpdir, f"{model_name}.meta.json")
         docs_path: Optional[str] = None
 
+        # CSV
         df.to_csv(csv_path, index=False)
 
+        # Schema
         schema_json = self._df_to_schema_json(df)
         Path(schema_path).write_text(json.dumps(schema_json, indent=2))
+
+        # Meta (include kind + optional date range)
+        if "date" in df.columns:
+            date_min = str(pd.to_datetime(df["date"], errors="coerce").min())
+            date_max = str(pd.to_datetime(df["date"], errors="coerce").max())
+        else:
+            date_min = None
+            date_max = None
 
         meta = {
             "n_rows": int(len(df)),
             "n_cols": int(len(df.columns)),
             "columns": list(df.columns),
-            "date_min": str(pd.to_datetime(df["date"], errors="coerce").min()),
-            "date_max": str(pd.to_datetime(df["date"], errors="coerce").max()),
-            "history_days": history,
+            "date_min": date_min,
+            "date_max": date_max,
+            "history_days": history if kind == "time_series" else None,
+            "kind": kind,
         }
         Path(meta_path).write_text(json.dumps(meta, indent=2))
 
+        # Optional: dbt docs (best-effort)
         docs_filename = None
         try:
             manifest = load_manifest(cfg)
             node = get_model_node(manifest, model_name)
             col_meta = get_column_metadata(node)
-            lines = [f"# {model_name}", (node.get("description", "") or "").strip(), "\n## Columns:"]
+            lines = [
+                f"# {model_name}",
+                (node.get("description", "") or "").strip(),
+                "\n## Columns:",
+            ]
             for col, info in (col_meta or {}).items():
-                lines.append(f"- **{col}** ({info.get('data_type')}): {info.get('description')}")
+                lines.append(
+                    f"- **{col}** ({info.get('data_type')}): {info.get('description')}"
+                )
             docs_path = os.path.join(tmpdir, f"{model_name}.docs.md")
             Path(docs_path).write_text("\n".join([l for l in lines if l]))
             docs_filename = os.path.basename(docs_path)
         except Exception:
+            # Silent fallback; schema/meta/CSV are enough
             pass
 
+        # 3) Build the free-form prompt (template depends on kind)
         prompt = build_ci_prompt(
             model=model_name,
+            kind=kind,
             history_days=history,
             csv_filename=os.path.basename(csv_path),
             schema_filename=os.path.basename(schema_path),
@@ -123,7 +188,8 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             docs_filename=docs_filename,
         )
 
-        file_ids = []
+        # 4) Upload files and collect file_ids for the container
+        file_ids: List[str] = []
         with open(csv_path, "rb") as f_csv:
             csv_file = self.client.files.create(file=f_csv, purpose="assistants")
             file_ids.append(csv_file.id)
@@ -139,13 +205,16 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                 docs_file = self.client.files.create(file=f_docs, purpose="assistants")
                 file_ids.append(docs_file.id)
 
-        tools = [{
-            "type": "code_interpreter",
-            "container": {
-                "type": "auto",
-                "file_ids": file_ids,
-            },
-        }]
+        # 5) Create the response with a code_interpreter container that includes these files
+        tools = [
+            {
+                "type": "code_interpreter",
+                "container": {
+                    "type": "auto",
+                    "file_ids": file_ids,
+                },
+            }
+        ]
 
         instructions = (
             "You are a data analyst. Always use the python tool to load the attached files. "
@@ -163,17 +232,19 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             temperature=0.2,
         )
 
+        # Collect container artifacts (citations)
         try:
             self._last_artifacts = self._extract_container_artifacts(resp)
         except Exception:
             self._last_artifacts = None
 
+        # 6) Return final text (try several shapes)
         text = getattr(resp, "output_text", None)
         if isinstance(text, str) and text.strip():
             return text
 
         try:
-            parts = []
+            parts: List[str] = []
             output = getattr(resp, "output", None)
             if isinstance(output, list):
                 for item in output:
@@ -190,16 +261,23 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         except Exception:
             pass
 
+        # Last resort
         return str(resp)
 
+    # ---------- Artifacts (citations) ----------
 
     def _extract_container_artifacts(self, resp) -> dict | None:
+        """
+        Walk the Responses API output and collect any container file citations.
+        Returns a dict: {"container_ids": [...], "files": [{"container_id","file_id","filename"}]}
+        """
         artifacts = {"container_ids": [], "files": []}
         seen_containers = set()
 
         output = getattr(resp, "output", None)
         if isinstance(output, list):
             for item in output:
+                # Dict-shape
                 if isinstance(item, dict) and item.get("type") == "message":
                     for content in (item.get("content") or []):
                         anns = content.get("annotations") or []
@@ -211,11 +289,14 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                                 if cid and cid not in seen_containers:
                                     seen_containers.add(cid)
                                 if cid and fid:
-                                    artifacts["files"].append({
-                                        "container_id": cid,
-                                        "file_id": fid,
-                                        "filename": fname,
-                                    })
+                                    artifacts["files"].append(
+                                        {
+                                            "container_id": cid,
+                                            "file_id": fid,
+                                            "filename": fname,
+                                        }
+                                    )
+                # Attr-shape
                 elif hasattr(item, "content"):
                     for content in (item.content or []):
                         anns = getattr(content, "annotations", None) or []
@@ -227,11 +308,13 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                                 if cid and cid not in seen_containers:
                                     seen_containers.add(cid)
                                 if cid and fid:
-                                    artifacts["files"].append({
-                                        "container_id": cid,
-                                        "file_id": fid,
-                                        "filename": fname,
-                                    })
+                                    artifacts["files"].append(
+                                        {
+                                            "container_id": cid,
+                                            "file_id": fid,
+                                            "filename": fname,
+                                        }
+                                    )
 
         artifacts["container_ids"] = list(seen_containers)
         return artifacts
@@ -240,8 +323,13 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         """Return artifacts collected from the most recent run (or None)."""
         return getattr(self, "_last_artifacts", None)
 
+    # ---------- Downloads ----------
 
     def _get_base_url(self) -> str:
+        """
+        Return a usable base URL string for raw HTTP calls, honoring OPENAI_BASE_URL if set.
+        Handles httpx.URL objects from the SDK.
+        """
         env_base = os.getenv("OPENAI_BASE_URL")
         if env_base:
             return env_base.rstrip("/")
@@ -257,6 +345,16 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         output_dir: str = "reports/plots",
         include_extensions: Iterable[str] = (".png", ".jpg", ".jpeg", ".csv", ".json", ".md"),
     ) -> List[str]:
+        """
+        Download container-generated files from the last run to local disk.
+
+        Returns a list of saved file paths (or 'ERROR:<filename>:<exc>' strings on failure).
+
+        Strategy:
+        1) Prefer SDK container-files retrieval if available.
+        2) Fallback to direct HTTP GET:
+           GET {base_url}/containers/{container_id}/files/{file_id}/content
+        """
         arts = self.get_last_artifacts()
         if not arts or not arts.get("files"):
             return []
@@ -268,6 +366,7 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         api_key = os.getenv("OPENAI_API_KEY") or self._api_key or ""
         org = os.getenv("OPENAI_ORG_ID") or os.getenv("OPENAI_ORGANIZATION")
 
+        # Try to discover SDK method names (versions differ)
         sdk_cf = getattr(self.client, "container_files", None)
         sdk_retrieve = getattr(sdk_cf, "retrieve_content", None) if sdk_cf else None
         sdk_content = getattr(sdk_cf, "content", None) if sdk_cf else None
@@ -277,6 +376,7 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             fid = f.get("file_id")
             fname = f.get("filename") or (fid + ".bin")
 
+            # filter by extension if provided
             if include_extensions:
                 try:
                     low = fname.lower()
@@ -289,16 +389,26 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             try:
                 content_bytes = None
 
+                # 1) Prefer SDK method (if present in this version)
                 try:
                     if callable(sdk_retrieve):
                         resp = sdk_retrieve(container_id=cid, file_id=fid)
-                        content_bytes = getattr(resp, "read", None) and resp.read() or getattr(resp, "content", None)
+                        content_bytes = (
+                            getattr(resp, "read", None)
+                            and resp.read()
+                            or getattr(resp, "content", None)
+                        )
                     elif callable(sdk_content):
                         resp = sdk_content(container_id=cid, file_id=fid)
-                        content_bytes = getattr(resp, "read", None) and resp.read() or getattr(resp, "content", None)
+                        content_bytes = (
+                            getattr(resp, "read", None)
+                            and resp.read()
+                            or getattr(resp, "content", None)
+                        )
                 except Exception:
-                    content_bytes = None
+                    content_bytes = None  # fall through to HTTP
 
+                # 2) Raw HTTP fallback
                 if content_bytes is None:
                     url = f"{base_url}/containers/{cid}/files/{fid}/content"
                     headers = {"Authorization": f"Bearer {api_key}"}
