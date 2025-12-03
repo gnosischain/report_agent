@@ -13,22 +13,38 @@ class ClickHouseConnector:
 
         common = dict(
             host    = cfg["host"],
-            #port    = cfg.get("port"),
             username= cfg["user"],
             password= cfg["password"],
             secure  = cfg["secure"],
             verify  = cfg.get("verify", True),
         )
-        # read client
-        self.read = clickhouse_connect.get_client(
-            **common,
-            database=cfg["db_read"],
-        )
-        # write client
-        self.write = clickhouse_connect.get_client(
-            **common,
-            database=cfg["db_write"],
-        )
+        # Port is optional; clickhouse-connect uses default ports if not provided
+        # (8123 for HTTP, 9440 for HTTPS). Uncomment and add CLICKHOUSE_PORT to .env if needed.
+        if cfg.get("port"):
+            common["port"] = int(cfg["port"])
+        
+        # Initialize read and write clients with better error messages
+        try:
+            self.read = clickhouse_connect.get_client(
+                **common,
+                database=cfg["db_read"],
+            )
+        except Exception as e:
+            raise ConnectionError(
+                f"Failed to connect to ClickHouse (read database '{cfg['db_read']}'): {e}. "
+                f"Check CLICKHOUSE_HOST, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, and network connectivity."
+            ) from e
+        
+        try:
+            self.write = clickhouse_connect.get_client(
+                **common,
+                database=cfg["db_write"],
+            )
+        except Exception as e:
+            raise ConnectionError(
+                f"Failed to connect to ClickHouse (write database '{cfg['db_write']}'): {e}. "
+                f"Check CLICKHOUSE_HOST, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, and network connectivity."
+            ) from e
 
     def _ensure_read_only(self, sql: str):
         stmt = sql.strip().lower()
