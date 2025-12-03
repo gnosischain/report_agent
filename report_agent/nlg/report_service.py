@@ -55,16 +55,23 @@ def generate_html_report(
     else:
         plots_index_path.write_text("", encoding="utf-8")
 
-    reg = MetricsRegistry()
-    kind = reg.get_kind(model)
-
-    loader = MetricsLoader()
-    if kind == "time_series":
-        hist = reg.get_history_days(model)
-        df = loader.fetch_time_series(model, lookback_days=hist)
-    else:
-        hist = 0
-        df = loader.fetch_snapshot(model)
+    # Try to reuse the dataframe that was already fetched for LLM processing
+    # This avoids duplicate database queries
+    df = None
+    if hasattr(connector, "get_last_dataframe"):
+        df = connector.get_last_dataframe(model)
+    
+    # If dataframe not available from connector, fetch it (backward compatible)
+    if df is None:
+        reg = MetricsRegistry()
+        kind = reg.get_kind(model)
+        
+        loader = MetricsLoader()
+        if kind == "time_series":
+            hist = reg.get_history_days(model)
+            df = loader.fetch_time_series(model, lookback_days=hist)
+        else:
+            df = loader.fetch_snapshot(model)
 
     data_dir = out_root / data_subdir
     data_dir.mkdir(parents=True, exist_ok=True)

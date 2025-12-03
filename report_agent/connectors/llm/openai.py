@@ -41,6 +41,8 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         self._api_key = api_key  # keep for HTTP fallback downloads
         self.tools = [{"type": "code_interpreter", "container": {"type": "auto"}}]
         self._last_artifacts: Optional[dict] = None
+        self._last_dataframe: Optional[pd.DataFrame] = None
+        self._last_model_name: Optional[str] = None
 
     # ---- Tools API (no-op here) ----
 
@@ -121,6 +123,10 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         # For time series, we require a date column; for snapshots we allow tables without date
         if kind == "time_series" and "date" not in df.columns:
             return f"Model '{model_name}' has no 'date' column; cannot proceed."
+
+        # Store the dataframe for potential reuse (e.g., saving CSV without re-fetching)
+        self._last_dataframe = df.copy()  # Store a copy to avoid mutations
+        self._last_model_name = model_name
 
         # 2) Prepare files (CSV + schema + meta + optional docs)
         tmpdir = tempfile.mkdtemp(prefix=f"{model_name.replace('.', '_')}_")
@@ -322,6 +328,25 @@ class OpenAICodeInterpreterConnector(LLMConnector):
     def get_last_artifacts(self):
         """Return artifacts collected from the most recent run (or None)."""
         return getattr(self, "_last_artifacts", None)
+
+    def get_last_dataframe(self, model_name: str) -> Optional[pd.DataFrame]:
+        """
+        Return the dataframe from the most recent run if it matches the model.
+        
+        This allows callers to reuse the dataframe that was already fetched for LLM processing,
+        avoiding duplicate database queries.
+        
+        Args:
+            model_name: The model name to check against
+            
+        Returns:
+            DataFrame if available and matches model, None otherwise
+        """
+        if getattr(self, "_last_model_name", None) == model_name:
+            df = getattr(self, "_last_dataframe", None)
+            if df is not None:
+                return df.copy()  # Return a copy to avoid mutations
+        return None
 
     # ---------- Downloads ----------
 
