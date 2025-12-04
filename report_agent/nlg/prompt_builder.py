@@ -64,9 +64,26 @@ def build_ci_prompt(
     else:
         template_name = "ci_report_prompt.j2"
 
+    # Extract model description from catalog or dbt
+    model_description = ""
+    if catalog and model in catalog:
+        model_description = catalog[model].get("description", "")
+    
+    if not model_description:
+        # Fallback: try to load from manifest
+        try:
+            cfg = load_configs()
+            manifest = load_manifest(cfg)
+            node = get_model_node(manifest, model)
+            if node:
+                model_description = node.get("description", "")
+        except Exception:
+            pass
+
     template = env.get_template(template_name)
     return template.render(
         model=model,
+        model_description=model_description,
         history_days=history_days,
         csv_filename=csv_filename,
         schema_filename=schema_filename,

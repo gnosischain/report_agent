@@ -24,6 +24,26 @@ Column conventions (from schema + dbt docs):
 - Use the `role` hints in the schema (time / measure / dimension / delta) together
   with dbt docs to decide how to interpret columns.
 
+{% if model_description %}
+## Metric Context
+
+This metric represents: **{{ model_description }}**
+
+**CRITICAL: Use Business-Friendly Language**
+
+In your final report narrative and chart titles, you MUST use natural, business-friendly language instead of technical model names:
+
+- **DO NOT** use the technical model name `{{ model }}` anywhere in your narrative text
+- **DO** use descriptive, readable phrases based on the metric description
+  - Examples: "Active accounts by sector", "P2P client activity", "Transaction volume", "Execution layer activity"
+  - Base your friendly name on: "{{ model_description }}"
+- **For chart titles**: Use short, readable names (e.g., "Active Accounts by Sector" or "P2P Client Activity") 
+  - NOT the technical name like "api_execution_transactions_active_accounts_by_sector_daily"
+- **When referencing related models**: Also use friendly names, not technical model names
+
+The technical model name `{{ model }}` should only appear in file paths (which are not shown to BD) and internal code comments.
+{% endif %}
+
 {% if has_catalog %}
 ## Pre-fetched Related Models
 
@@ -100,16 +120,16 @@ Create and **display** two figures that directly support the executive summary:
 **Figure 1 — Headline weekly total trend (last ~8–12 weeks)**
 - What: total (all segments) aggregated to weekly using the main `value` measure.
 - Highlight: clearly highlight the **last two weeks** (e.g., shaded span or distinct markers).
-- Annotate on the chart the WoW delta (absolute and %), e.g., “+72 (+8.2% WoW)”.
-- Title: “{{ model }} — Weekly total (headline)” and a subtitle with the key number(s).
-- Save to `plots/{{ model }}_headline_weekly.png`, then also display it so it’s cited.
+- Annotate on the chart the WoW delta (absolute and %), e.g., "+72 (+8.2% WoW)".
+- Title: Use a short, readable name based on the metric description (e.g., "Active Accounts by Sector — Weekly total" or "P2P Client Activity — Weekly total"), NOT the technical model name "{{ model }}". Include a subtitle with the key number(s).
+- Save to `plots/{{ model }}_headline_weekly.png`, then also display it so it's cited.
 
 **Figure 2 — Last week vs prior week by top 5 segments**
 - What: grouped bars for **top 5 labels by absolute change** week-over-week.
 - Bars: last week vs previous week side-by-side; y-axis starts at 0; add exact values as labels.
 - Sort: by absolute change descending (largest mover first).
-- Title: “{{ model }} — Top 5 movers (WoW)”.
-- Save to `plots/{{ model }}_top5_wow.png`, then also display it so it’s cited.
+- Title: Use a short, readable name based on the metric description (e.g., "Active Accounts by Sector — Top 5 movers" or "P2P Client Activity — Top 5 movers"), NOT the technical model name "{{ model }}".
+- Save to `plots/{{ model }}_top5_wow.png`, then also display it so it's cited.
 - If there is no `label` / segment dimension, skip this figure.
 
 Implementation notes:
@@ -126,9 +146,10 @@ Implementation notes:
   - **Key numbers** — totals and WoW deltas (absolute + %), top movers.
   - **Drivers & notes** — brief bullets (segments, timing, anomalies, caveats).
   - **Outlook / Watch next week** — 2–3 bullets (actionable).
-- Do **not** include code, logs, or “first I did X” narration.
-- Do **not** include file paths in the text; refer generically to the “headline trend”
-  and “movers chart”.
+- Do **not** include code, logs, or "first I did X" narration.
+- Do **not** include file paths in the text; refer generically to the "headline trend"
+  and "movers chart".
+- **CRITICAL**: Use business-friendly language throughout. Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts by sector", "P2P client activity", "transaction volume").
 
 ## Guardrails
 - Allowed imports: pandas, numpy, matplotlib, json (others only if already available).

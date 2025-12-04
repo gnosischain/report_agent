@@ -25,6 +25,26 @@ Column conventions (from schema + dbt docs):
 - A column named `label` with role "dimension" is a segment / category, not a metric.
 - A column named `change_pct` or with role "delta" is a change vs previous window.
 
+{% if model_description %}
+## Metric Context
+
+This metric represents: **{{ model_description }}**
+
+**CRITICAL: Use Business-Friendly Language**
+
+In your final report narrative and chart titles, you MUST use natural, business-friendly language instead of technical model names:
+
+- **DO NOT** use the technical model name `{{ model }}` anywhere in your narrative text
+- **DO** use descriptive, readable phrases based on the metric description
+  - Examples: "Active accounts", "P2P client count", "Transaction volume", "Execution layer metrics"
+  - Base your friendly name on: "{{ model_description }}"
+- **For chart titles**: Use short, readable names (e.g., "Active Accounts" or "P2P Client Count") 
+  - NOT the technical name like "api_execution_transactions_active_accounts_7d"
+- **When referencing related models**: Also use friendly names, not technical model names
+
+The technical model name `{{ model }}` should only appear in file paths (which are not shown to BD) and internal code comments.
+{% endif %}
+
 {% if has_catalog %}
 ## Pre-fetched Related Models
 
@@ -87,6 +107,7 @@ Create up to **one or two** simple charts that help BD interpret the snapshot:
   - you may show `change_pct` by `label` or as a single annotated number.
 
 If you create plots:
+- Title: Use a short, readable name based on the metric description (e.g., "Active Accounts" or "P2P Client Count"), NOT the technical model name "{{ model }}".
 - Save them under `plots/{{ model }}_*.png` and display them so they are cited.
 - `import os; os.makedirs("plots", exist_ok=True)` before saving.
 
@@ -110,3 +131,5 @@ Write a concise BD-facing summary (≈100–200 words), with:
 
 Do **not** include code, logs, or step-by-step narration. Focus on a clear,
 decision-oriented explanation of the snapshot.
+
+**CRITICAL**: Use business-friendly language throughout. Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts", "P2P client count", "transaction volume").

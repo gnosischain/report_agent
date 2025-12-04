@@ -5,10 +5,10 @@ You are given:
 2. dbt metadata for each metric (model description and column descriptions).
 
 For each metric, you have:
-- the metric name
+- the metric name (technical database name - DO NOT use this in your narrative)
 - the full BD-facing weekly report text (from a previous LLM run)
 - dbt metadata:
-  - model description: what this table/metric represents
+  - model description: what this table/metric represents (USE THIS to create friendly names)
   - columns and their meanings / data types
 
 Your high-level goals:
@@ -16,11 +16,20 @@ Your high-level goals:
 - Explain clearly WHY these metrics matter more than the others.
 - Sanity-check the metric reports against the dbt metadata and flag any possible issues.
 
+**CRITICAL: Use Business-Friendly Language**
+
+- **DO NOT** use technical metric names (like `api_p2p_discv4_clients_daily`) anywhere in your narrative
+- **DO** use descriptive, readable phrases based on the dbt model descriptions
+  - Examples: "Active accounts by sector", "P2P client activity", "Transaction volume", "Execution layer metrics"
+- **For chart references**: Use friendly names like "the P2P client activity chart" or "the active accounts by sector chart"
+- **When referencing metrics**: Always use business-friendly language, never technical names
+
 At the very TOP of your output, on a single line, write:
 
 HIGHLIGHTED_METRICS: name1, name2, ...
 
-where each name is the exact metric name (e.g. api_p2p_discv4_clients_daily).
+where each name is the exact technical metric name (e.g. api_p2p_discv4_clients_daily).
+This line is for internal processing only - it will not appear in the final report.
 List between 2 and 4 metrics. Then leave a blank line and write the portfolio summary.
 
 When choosing highlighted metrics, consider:
@@ -46,13 +55,15 @@ Write a single portfolio-level summary with Markdown sections:
 
 **Highlights**
 - 3–5 bullets.
-- Each bullet should mention specific metrics by name and why they matter.
-- When relevant, refer to their charts generically, e.g. “see the api_p2p_discv4_clients_daily headline chart”.
+- Each bullet should mention specific metrics using business-friendly names (based on their descriptions) and why they matter.
+- When relevant, refer to their charts using friendly names, e.g. "see the P2P client activity chart" or "the active accounts by sector headline chart".
+- **DO NOT** use technical metric names like `api_p2p_discv4_clients_daily` in your narrative.
 
 **Key numbers**
 - 3–7 bullets.
 - Include the most important numbers across metrics (levels and WoW deltas).
-- Always tie numbers back to specific metrics.
+- Always tie numbers back to specific metrics using business-friendly names (e.g., "P2P client activity" or "Active accounts by sector").
+- **DO NOT** use technical metric names.
 
 **Risks & opportunities**
 - 2–4 bullets on what BD should watch (degradation, capacity limits, user behavior shifts, protocol risks, etc.).
@@ -66,16 +77,18 @@ Write a single portfolio-level summary with Markdown sections:
 Metric reports (from previous weekly CI runs):
 
 {% for metric, text in metric_reports.items() %}
-#### {{ metric }}
+#### {{ metric }} (Technical name - for reference only)
+**Friendly name based on description**: Use the description below to create a business-friendly name for this metric in your narrative.
+
 {{ text }}
 
 {% endfor %}
 
-dbt metadata:
+dbt metadata (use descriptions to create friendly names):
 
 {% for metric, docs in metric_docs.items() %}
 #### {{ metric }} — dbt docs
-Model description:
+**Model description** (use this to create the friendly name):
 {{ docs.description or "N/A" }}
 
 Columns:
