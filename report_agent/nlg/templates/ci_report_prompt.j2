@@ -10,6 +10,10 @@ This dataset is a **time-series metric** with optional segment/dimension columns
 - {{ schema_filename }}  (JSON schema with dtype hints & small example values)
 - {{ meta_filename }}    (counts, date coverage, columns; includes a `kind` field)
 {% if docs_filename %}- {{ docs_filename }}    (dbt docs: model + column descriptions, if available){% endif %}
+{% if has_catalog %}- model_catalog.json  (catalog of all available models in the database){% endif %}
+{% if pre_fetched_models %}
+{% for model_name, csv_file in pre_fetched_models.items() %}- {{ csv_file }}  (pre-fetched related model: {{ model_name }}){% endfor %}
+{% endif %}
 
 Column conventions (from schema + dbt docs):
 - A column named `date` is the **time axis**.
@@ -20,6 +24,63 @@ Column conventions (from schema + dbt docs):
 - Use the `role` hints in the schema (time / measure / dimension / delta) together
   with dbt docs to decide how to interpret columns.
 
+{% if has_catalog %}
+## Pre-fetched Related Models
+
+{% if pre_fetched_models %}
+The following related models have been pre-fetched and are available for your analysis:
+{% for model_name, csv_file in pre_fetched_models.items() %}
+- **{{ model_name }}** - {{ catalog.get(model_name, {}).get('description', 'No description') }} (see {{ csv_file }})
+{% endfor %}
+
+**You decide which ones to use** - load and analyze only the models that provide useful context:
+```python
+import pandas as pd
+{% for model_name, csv_file in pre_fetched_models.items() %}
+# Load {{ model_name }} if it's relevant to your analysis
+# df_{{ model_name.replace('.', '_') }} = pd.read_csv('{{ csv_file }}')
+{% if catalog.get(model_name, {}).get('kind') == 'time_series' %}
+# df_{{ model_name.replace('.', '_') }}['date'] = pd.to_datetime(df_{{ model_name.replace('.', '_') }}['date'], errors='coerce')
+{% endif %}
+{% endfor %}
+```
+
+**Important**: Only load and analyze the pre-fetched models that are actually relevant to your analysis.
+Don't load all of them "just in case" - be selective based on what you discover in the primary metric.
+
+{% else %}
+No related models were pre-fetched for this metric.
+{% endif %}
+
+## Full Model Catalog
+
+You also have access to the complete model catalog (`model_catalog.json`) with all available models in the database.
+
+**Your task**:
+1. Analyze the primary metric ({{ csv_filename }})
+2. Use the pre-fetched related models (uploaded above) if they provide useful context for cross-validation or deeper insights
+3. Review the catalog to understand what other models are available
+4. In your analysis, mention which additional models from the catalog would be useful for future analysis (if any)
+
+The catalog includes models across different domains (execution, p2p, tokens, contracts, etc.).
+For project/contract-specific metrics, use your semantic understanding to identify related models
+that might share business context, even if they're in different domains.
+
+### How to Use the Catalog
+
+```python
+import json
+
+# Load catalog
+with open('model_catalog.json', 'r') as f:
+    catalog = json.load(f)
+
+# Explore available models
+for name, info in catalog.items():
+    print(f"{name}: {info.get('description', '')} (domain: {info.get('domain')})")
+```
+
+{% endif %}
 ## What to do (analysis checklist — do not include this in the final message)
 1) Load the CSV into a DataFrame `df`. Parse `df["date"] = pd.to_datetime(df["date"], errors="coerce")`.
 2) Expect **multiple rows per date** (long format). Decide column roles (time/value/segments).
@@ -29,6 +90,9 @@ Column conventions (from schema + dbt docs):
    - Compare the most recent 7 days to the prior 7 days.
    - Show trend over the history window.
    - If relevant, segment breakdowns (e.g., by `label` or similar).
+{% if has_catalog %}
+5) **Optional but encouraged**: If you notice interesting patterns, query related models from the catalog to provide richer context and cross-validation.
+{% endif %}
 
 ## Visual outputs (REQUIRED — create exactly these, in this order)
 Create and **display** two figures that directly support the executive summary:
@@ -67,6 +131,10 @@ Implementation notes:
   and “movers chart”.
 
 ## Guardrails
-- Allowed imports: pandas, numpy, matplotlib (others only if already available).
+- Allowed imports: pandas, numpy, matplotlib, json (others only if already available).
 - No network calls. File I/O limited to reading provided files and saving plots to `plots/`.
 - On any error: fix it and continue, but keep errors out of the final narrative.
+{% if has_catalog %}
+- Use the pre-fetched related models if they're relevant to your analysis.
+- Review the catalog to understand available models, but focus your analysis on the primary metric and pre-fetched models.
+{% endif %}

@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -11,11 +12,23 @@ from report_agent.utils.config_loader import load_configs, validate_config
 
 
 def main():
+    # Configure logging to show INFO level messages
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(levelname)s: %(message)s',
+        stream=sys.stdout
+    )
+    
     parser = argparse.ArgumentParser(description="Run metrics reports")
     parser.add_argument("--metric", help="Run report only for this metric/model")
     parser.add_argument("--out-dir", default="reports", help="Base output directory")
     parser.add_argument("--no-summary", action="store_true", help="Do not produce a cross-metric summary")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Enable debug logging")
     args = parser.parse_args()
+    
+    # Set debug level if verbose flag is used
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     # Load and validate configuration early
     try:

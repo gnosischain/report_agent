@@ -15,12 +15,55 @@ This dataset is a **snapshot metric**, not a long time series. Typical columns:
 - {{ schema_filename }}  (JSON schema with dtype hints, roles & small example values)
 - {{ meta_filename }}    (row/column counts; includes a `kind` field of "snapshot")
 {% if docs_filename %}- {{ docs_filename }}    (dbt docs: model + column descriptions, if available){% endif %}
+{% if has_catalog %}- model_catalog.json  (catalog of all available models in the database){% endif %}
+{% if pre_fetched_models %}
+{% for model_name, csv_file in pre_fetched_models.items() %}- {{ csv_file }}  (pre-fetched related model: {{ model_name }}){% endfor %}
+{% endif %}
 
 Column conventions (from schema + dbt docs):
 - A column named `value` with role "measure" is the main KPI.
 - A column named `label` with role "dimension" is a segment / category, not a metric.
 - A column named `change_pct` or with role "delta" is a change vs previous window.
 
+{% if has_catalog %}
+## Pre-fetched Related Models
+
+{% if pre_fetched_models %}
+The following related models have been pre-fetched and are available for your analysis:
+{% for model_name, csv_file in pre_fetched_models.items() %}
+- **{{ model_name }}** - {{ catalog.get(model_name, {}).get('description', 'No description') }} (see {{ csv_file }})
+{% endfor %}
+
+**You decide which ones to use** - load and analyze only the models that provide useful context:
+```python
+import pandas as pd
+{% for model_name, csv_file in pre_fetched_models.items() %}
+# Load {{ model_name }} if it's relevant to your analysis
+# df_{{ model_name.replace('.', '_') }} = pd.read_csv('{{ csv_file }}')
+{% if catalog.get(model_name, {}).get('kind') == 'time_series' %}
+# df_{{ model_name.replace('.', '_') }}['date'] = pd.to_datetime(df_{{ model_name.replace('.', '_') }}['date'], errors='coerce')
+{% endif %}
+{% endfor %}
+```
+
+**Important**: Only load and analyze the pre-fetched models that are actually relevant to your analysis.
+Don't load all of them "just in case" - be selective based on what you discover in the snapshot.
+
+{% else %}
+No related models were pre-fetched for this snapshot.
+{% endif %}
+
+## Full Model Catalog
+
+You also have access to the complete model catalog (`model_catalog.json`) with all available models.
+
+**Your task**:
+1. Analyze the snapshot metric ({{ csv_filename }})
+2. Use the pre-fetched related models (uploaded above) if they help validate the snapshot against trends
+3. Review the catalog to understand what other models are available
+4. In your analysis, mention which additional models from the catalog would be useful for future analysis (if any)
+
+{% endif %}
 ## What to do (analysis checklist — do not include this in the final message)
 1) Load the CSV into a DataFrame `df` and inspect its columns and dtypes.
 2) Identify the main KPI (`value`) and any `change_pct` column.
@@ -30,6 +73,9 @@ Column conventions (from schema + dbt docs):
 4) Decide whether to:
    - aggregate across segments (e.g. total or average value),
    - or focus on a small number of key segments.
+{% if has_catalog %}
+5) **Optional**: Use the pre-fetched related models to validate the snapshot against trends or provide context.
+{% endif %}
 
 ## Visual outputs (OPTIONAL but encouraged)
 Create up to **one or two** simple charts that help BD interpret the snapshot:

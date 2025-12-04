@@ -7,43 +7,62 @@ from report_agent.utils.config_loader import load_configs
 
 log = logging.getLogger(__name__)
 
+
+def create_clickhouse_client(config: dict, database: str):
+    """
+    Create a ClickHouse client from configuration.
+    
+    Args:
+        config: Dictionary with connection parameters (host, user, password, secure, verify, port)
+        database: Database name to connect to
+    
+    Returns:
+        ClickHouse client instance
+    
+    Raises:
+        ConnectionError: If connection fails
+    """
+    common = dict(
+        host=config["host"],
+        username=config["user"],
+        password=config["password"],
+        secure=config.get("secure", True),
+        verify=config.get("verify", True),
+    )
+    # Port is optional; clickhouse-connect uses default ports if not provided
+    # (8123 for HTTP, 9440 for HTTPS)
+    if config.get("port"):
+        common["port"] = int(config["port"])
+    
+    try:
+        return clickhouse_connect.get_client(
+            **common,
+            database=database,
+        )
+    except Exception as e:
+        raise ConnectionError(
+            f"Failed to connect to ClickHouse (database '{database}'): {e}. "
+            f"Check CLICKHOUSE_HOST, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, and network connectivity."
+        ) from e
+
+
 class ClickHouseConnector:
     def __init__(self):
         cfg = load_configs()["clickhouse"]
-
-        common = dict(
-            host    = cfg["host"],
-            username= cfg["user"],
-            password= cfg["password"],
-            secure  = cfg["secure"],
-            verify  = cfg.get("verify", True),
-        )
-        # Port is optional; clickhouse-connect uses default ports if not provided
-        # (8123 for HTTP, 9440 for HTTPS). Uncomment and add CLICKHOUSE_PORT to .env if needed.
-        if cfg.get("port"):
-            common["port"] = int(cfg["port"])
         
-        # Initialize read and write clients with better error messages
+        # Initialize read and write clients using shared connection utility
         try:
-            self.read = clickhouse_connect.get_client(
-                **common,
-                database=cfg["db_read"],
-            )
-        except Exception as e:
+            self.read = create_clickhouse_client(cfg, cfg["db_read"])
+        except ConnectionError as e:
             raise ConnectionError(
-                f"Failed to connect to ClickHouse (read database '{cfg['db_read']}'): {e}. "
-                f"Check CLICKHOUSE_HOST, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, and network connectivity."
+                f"Failed to connect to ClickHouse (read database '{cfg['db_read']}'): {e}"
             ) from e
         
         try:
-            self.write = clickhouse_connect.get_client(
-                **common,
-                database=cfg["db_write"],
-            )
-        except Exception as e:
+            self.write = create_clickhouse_client(cfg, cfg["db_write"])
+        except ConnectionError as e:
             raise ConnectionError(
-                f"Failed to connect to ClickHouse (write database '{cfg['db_write']}'): {e}. "
-                f"Check CLICKHOUSE_HOST, CLICKHOUSE_USER, CLICKHOUSE_PASSWORD, and network connectivity."
+                f"Failed to connect to ClickHouse (write database '{cfg['db_write']}'): {e}"
             ) from e
 
     def _ensure_read_only(self, sql: str):

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -11,6 +12,8 @@ import httpx
 import pandas as pd
 from openai import OpenAI
 
+log = logging.getLogger(__name__)
+
 from report_agent.connectors.llm.base import LLMConnector
 from report_agent.metrics.metrics_loader import MetricsLoader
 from report_agent.metrics.metrics_registry import MetricsRegistry
@@ -19,6 +22,9 @@ from report_agent.dbt_context.from_docs_json import (
     load_manifest,
     get_model_node,
     get_column_metadata,
+    build_model_catalog,
+    save_catalog_to_file,
+    find_related_models,
 )
 from report_agent.utils.config_loader import load_configs
 
@@ -183,6 +189,59 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             # Silent fallback; schema/meta/CSV are enough
             pass
 
+        # Build model catalog and pre-fetch related models (server-side, secure)
+        catalog_filename = None
+        pre_fetched_models = {}
+        catalog = {}
+        try:
+            # Build model catalog
+            catalog = build_model_catalog(cfg)
+            if catalog:
+                catalog_path = os.path.join(tmpdir, "model_catalog.json")
+                save_catalog_to_file(catalog, catalog_path)
+                catalog_filename = "model_catalog.json"
+                
+                # Pre-fetch related models server-side (secure, no credentials in sandbox)
+                # Upload all pre-fetched models - LLM will decide which ones it needs
+                if model_name in catalog:
+                    related = find_related_models(model_name, catalog, max_related=5)  # Fetch up to 5
+                    log.info(f"Found {len(related)} related models for {model_name}: {related}")
+                    
+                    for related_name in related:
+                        try:
+                            # Fetch directly using ClickHouseConnector (bypasses MetricsRegistry requirement)
+                            # This allows fetching any model from catalog, not just those in metrics.yml
+                            if catalog[related_name]["kind"] == "time_series":
+                                sql = f"""
+                                    SELECT *
+                                    FROM {loader.db.read.database}.{related_name}
+                                    WHERE date >= today() - INTERVAL 30 DAY
+                                    ORDER BY date ASC
+                                """
+                                df_related = loader.db.fetch_df(sql)
+                            else:
+                                sql = f"SELECT * FROM {loader.db.read.database}.{related_name}"
+                                df_related = loader.db.fetch_df(sql)
+                            
+                            related_csv_path = os.path.join(tmpdir, f"{related_name}.csv")
+                            df_related.to_csv(related_csv_path, index=False)
+                            pre_fetched_models[related_name] = os.path.basename(related_csv_path)
+                            log.info(f"  ✓ Pre-fetched {related_name} ({len(df_related)} rows)")
+                        except Exception as e:
+                            # Skip if can't fetch (model might not exist or have issues)
+                            log.warning(f"  ✗ Failed to pre-fetch {related_name}: {e}")
+                            pass
+                    
+                    if pre_fetched_models:
+                        log.info(f"Pre-fetched {len(pre_fetched_models)} related models for {model_name}: {list(pre_fetched_models.keys())}")
+                    else:
+                        log.info(f"No related models successfully pre-fetched for {model_name}")
+                else:
+                    log.debug(f"Model {model_name} not found in catalog, skipping related model pre-fetch")
+        except Exception as e:
+            # Log but don't fail - catalog is optional
+            log.warning(f"Could not build model catalog or pre-fetch related models: {e}")
+
         # 3) Build the free-form prompt (template depends on kind)
         prompt = build_ci_prompt(
             model=model_name,
@@ -192,6 +251,9 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             schema_filename=os.path.basename(schema_path),
             meta_filename=os.path.basename(meta_path),
             docs_filename=docs_filename,
+            has_catalog=bool(catalog_filename),
+            pre_fetched_models=pre_fetched_models,
+            catalog=catalog if catalog_filename else None,
         )
 
         # 4) Upload files and collect file_ids for the container
@@ -210,7 +272,24 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             with open(docs_path, "rb") as f_docs:
                 docs_file = self.client.files.create(file=f_docs, purpose="assistants")
                 file_ids.append(docs_file.id)
-
+        
+        # Upload catalog if available
+        if catalog_filename:
+            catalog_path = os.path.join(tmpdir, catalog_filename)
+            with open(catalog_path, "rb") as f_catalog:
+                catalog_file = self.client.files.create(file=f_catalog, purpose="assistants")
+                file_ids.append(catalog_file.id)
+        
+        # Upload pre-fetched related model CSVs (server-side fetched, secure)
+        if pre_fetched_models:
+            log.info(f"Uploading {len(pre_fetched_models)} pre-fetched related models to container")
+            for related_name, csv_filename in pre_fetched_models.items():
+                related_csv_path = os.path.join(tmpdir, csv_filename)
+                with open(related_csv_path, "rb") as f_related:
+                    related_file = self.client.files.create(file=f_related, purpose="assistants")
+                    file_ids.append(related_file.id)
+                    log.debug(f"  ✓ Uploaded {related_name} ({csv_filename})")
+        
         # 5) Create the response with a code_interpreter container that includes these files
         tools = [
             {
@@ -247,6 +326,8 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         # 6) Return final text (try several shapes)
         text = getattr(resp, "output_text", None)
         if isinstance(text, str) and text.strip():
+            # Check if any pre-fetched models were used in the analysis
+            self._check_pre_fetched_usage(text, pre_fetched_models)
             return text
 
         try:
@@ -263,12 +344,39 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                             if getattr(c, "type", None) in ("output_text", "text"):
                                 parts.append(getattr(c, "text", ""))
             if parts:
-                return "\n".join(p for p in parts if p)
+                text = "\n".join(p for p in parts if p)
+                self._check_pre_fetched_usage(text, pre_fetched_models)
+                return text
         except Exception:
             pass
 
         # Last resort
-        return str(resp)
+        text = str(resp)
+        # Check if any pre-fetched models were used in the analysis
+        self._check_pre_fetched_usage(text, pre_fetched_models)
+        return text
+
+    def _check_pre_fetched_usage(self, text: str, pre_fetched_models: dict):
+        """
+        Check if any pre-fetched models were mentioned/used in the LLM output.
+        Logs which models were potentially used.
+        """
+        if not pre_fetched_models or not text:
+            return
+        
+        text_lower = text.lower()
+        used_models = []
+        
+        for model_name, csv_filename in pre_fetched_models.items():
+            # Check if model name or CSV filename is mentioned in output
+            # This is a heuristic - not perfect but gives us an indication
+            if model_name.lower() in text_lower or csv_filename.lower() in text_lower:
+                used_models.append(model_name)
+        
+        if used_models:
+            log.info(f"✓ LLM appears to have used {len(used_models)}/{len(pre_fetched_models)} pre-fetched models: {used_models}")
+        else:
+            log.info(f"⚠ LLM did not appear to use any of the {len(pre_fetched_models)} pre-fetched models: {list(pre_fetched_models.keys())}")
 
     # ---------- Artifacts (citations) ----------
 
