@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Report Agent — Index</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { 
+      --bg:#0b0d12; 
+      --fg:#e7edf3; 
+      --muted:#aab7c7; 
+      --card:#121722; 
+      --accent:#7aa2ff;
+      --accent-hover:#8bb0ff;
+      --border:#1e2636;
+      --success:#4ade80;
+    }
+    * { box-sizing: border-box; }
+    body { 
+      margin:0; 
+      background:var(--bg); 
+      color:var(--fg); 
+      font: 16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, "Helvetica Neue", Arial, "Apple Color Emoji","Segoe UI Emoji"; 
+    }
+    header { 
+      padding: 24px 20px; 
+      border-bottom: 1px solid var(--border); 
+      background: linear-gradient(180deg, #101522, #0b0d12); 
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 24px 20px; }
+    h1 { margin: 0 0 6px; font-size: 28px; font-weight: 600; }
+    .meta { color: var(--muted); font-size: 14px; margin-top: 8px; }
+    .card { 
+      background: var(--card); 
+      border: 1px solid var(--border); 
+      border-radius: 12px; 
+      padding: 20px; 
+      margin: 16px 0; 
+    }
+    .search-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .search-input {
+      flex: 1;
+      min-width: 200px;
+      padding: 12px 16px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--fg);
+      font-size: 14px;
+    }
+    .search-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(122, 162, 255, 0.1);
+    }
+    .date-group {
+      margin-bottom: 32px;
+    }
+    .date-header {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--accent);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+    .report-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+    .report-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    .report-card.hidden {
+      display: none;
+    }
+    .report-card-title {
+      font-size: 15px;
+      font-weight: 500;
+      margin: 0 0 8px;
+      color: var(--fg);
+      word-break: break-word;
+    }
+    .report-card-meta {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+    a { 
+      color: var(--accent); 
+      text-decoration: none; 
+    }
+    a:hover { 
+      text-decoration: underline; 
+    }
+    .summary-link {
+      display: inline-block;
+      padding: 12px 24px;
+      background: var(--accent);
+      color: #fff;
+      border-radius: 8px;
+      margin-bottom: 24px;
+      font-weight: 500;
+      transition: background 0.2s;
+    }
+    .summary-link:hover {
+      background: var(--accent-hover);
+      text-decoration: none;
+    }
+    .stats {
+      display: flex;
+      gap: 24px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+    .stat-item {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .stat-value {
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .no-results {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--muted);
+    }
+    @media (max-width: 768px) {
+      .report-grid {
+        grid-template-columns: 1fr;
+      }
+      .search-bar {
+        flex-direction: column;
+      }
+      .search-input {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Report Agent</h1>
+      <div class="meta">
+        AI-powered data reports from ClickHouse + dbt
+        {% if summary_path %}
+        · <a href="{{ summary_path }}" style="color: var(--accent);">View Portfolio Summary</a>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    {% if summary_path %}
+    <div class="card" style="background: linear-gradient(135deg, #0f1a2e 0%, #1a2332 100%); border: 1px solid rgba(122, 162, 255, 0.2); margin-bottom: 24px;">
+      <h2 style="margin: 0 0 12px; color: var(--fg); font-size: 24px; font-weight: 600;">Portfolio Summary</h2>
+      <p style="margin: 0 0 16px; color: var(--muted); font-size: 15px;">
+        Get a high-level overview of all key metrics and insights
+      </p>
+      <a href="{{ summary_path }}" class="summary-link" style="background: var(--accent); color: #fff; display: inline-block; padding: 12px 24px; border-radius: 8px; font-weight: 600; text-decoration: none; transition: background 0.2s;">
+        View Summary Report →
+      </a>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="stats">
+        <div class="stat-item">
+          Total Reports: <span class="stat-value" id="total-count">{{ total_reports }}</span>
+        </div>
+        <div class="stat-item">
+          Showing: <span class="stat-value" id="showing-count">{{ total_reports }}</span>
+        </div>
+      </div>
+
+      <div class="search-bar">
+        <input 
+          type="text" 
+          id="search-input" 
+          class="search-input" 
+          placeholder="Search reports by metric name..."
+          autocomplete="off"
+        />
+      </div>
+    </div>
+
+    <div id="reports-container">
+      {% if sorted_dates %}
+        {% for date in sorted_dates %}
+        <div class="date-group" data-date="{{ date }}">
+          <div class="date-header">{{ date }}</div>
+          <div class="report-grid">
+            {% for report in reports_by_date[date] %}
+            <a href="{{ report.filename }}" class="report-card" data-model="{{ report.model }}" data-display-name="{{ report.display_name }}" data-date="{{ date }}">
+              <div class="report-card-title">{{ report.display_name }}</div>
+              <div class="report-card-meta">
+                Generated: {{ report.date.strftime('%Y-%m-%d %H:%M') }}
+              </div>
+            </a>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="card">
+          <div class="no-results">No reports found. Run <code>report-agent</code> to generate reports.</div>
+        </div>
+      {% endif %}
+    </div>
+
+    <div id="no-results" class="card no-results" style="display: none;">
+      No reports match your search criteria.
+    </div>
+  </main>
+
+  <script>
+    (function() {
+      const searchInput = document.getElementById('search-input');
+      const reportCards = document.querySelectorAll('.report-card');
+      const showingCount = document.getElementById('showing-count');
+      const noResults = document.getElementById('no-results');
+      
+      let currentSearch = '';
+
+      function updateDisplay() {
+        let visibleCount = 0;
+        let hasVisibleGroups = false;
+
+        // Filter by search (search in both model name and display name)
+        reportCards.forEach(card => {
+          const model = card.getAttribute('data-model').toLowerCase();
+          const displayName = (card.getAttribute('data-display-name') || '').toLowerCase();
+          const searchLower = currentSearch.toLowerCase();
+          const matchesSearch = currentSearch === '' || 
+            model.includes(searchLower) || 
+            displayName.includes(searchLower);
+          
+          const shouldShow = matchesSearch;
+          card.classList.toggle('hidden', !shouldShow);
+          
+          if (shouldShow) {
+            visibleCount++;
+          }
+        });
+
+        // Hide/show date groups based on visible cards
+        document.querySelectorAll('.date-group').forEach(group => {
+          const hasVisible = Array.from(group.querySelectorAll('.report-card'))
+            .some(card => !card.classList.contains('hidden'));
+          group.style.display = hasVisible ? '' : 'none';
+          if (hasVisible) hasVisibleGroups = true;
+        });
+
+        // Update counts
+        showingCount.textContent = visibleCount;
+        
+        // Show/hide no results message
+        noResults.style.display = (visibleCount === 0 && currentSearch) ? 'block' : 'none';
+      }
+
+      // Search input handler
+      searchInput.addEventListener('input', (e) => {
+        currentSearch = e.target.value.trim();
+        updateDisplay();
+      });
+
+      // Initial display
+      updateDisplay();
+    })();
+  </script>
+</body>
+</html>

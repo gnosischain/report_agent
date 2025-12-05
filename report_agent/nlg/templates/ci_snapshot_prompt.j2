@@ -110,6 +110,11 @@ If you create plots:
 - Title: Use a short, readable name based on the metric description (e.g., "Active Accounts" or "P2P Client Count"), NOT the technical model name "{{ model }}".
 - Save them under `plots/{{ model }}_*.png` and display them so they are cited.
 - `import os; os.makedirs("plots", exist_ok=True)` before saving.
+- **CRITICAL - Dark Mode Plots**: All plots MUST use a dark theme to match the report interface:
+  - Set figure background to dark (e.g., `fig.patch.set_facecolor('#0b0d12')` or `plt.style.use('dark_background')`)
+  - Use light-colored text and grid lines (white/light gray) for visibility
+  - Use bright, high-contrast colors for data series (avoid dark colors)
+  - Example: `plt.style.use('dark_background')` or manually set `facecolor='#0b0d12'`, `text.color='#e7edf3'`, `axes.facecolor='#121722'`
 
 If there is no meaningful visual to add, you may skip charts entirely.
 

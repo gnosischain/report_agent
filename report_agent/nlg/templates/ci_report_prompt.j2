@@ -136,6 +136,11 @@ Implementation notes:
 - Use clear axis labels, readable font sizes, and adequate figure size.
 - If there are fewer than 5 segments, use all available; if no segments, skip Figure 2.
 - `import os; os.makedirs("plots", exist_ok=True)` before saving.
+- **CRITICAL - Dark Mode Plots**: All plots MUST use a dark theme to match the report interface:
+  - Set figure background to dark (e.g., `fig.patch.set_facecolor('#0b0d12')` or `plt.style.use('dark_background')`)
+  - Use light-colored text and grid lines (white/light gray) for visibility
+  - Use bright, high-contrast colors for data series (avoid dark colors)
+  - Example: `plt.style.use('dark_background')` or manually set `facecolor='#0b0d12'`, `text.color='#e7edf3'`, `axes.facecolor='#121722'`
 
 ## Final deliverable (this is the ONLY thing you should output)
 - **Executive summary (one sentence, no first-person):** Start with one of

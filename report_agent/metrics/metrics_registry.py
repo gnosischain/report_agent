@@ -51,3 +51,11 @@ class MetricsRegistry:
         """
         cfg = self.get(model)
         return cfg.get("kind", "time_series")
+    
+    def get_display_name(self, model: str) -> str:
+        """
+        Return the human-readable display name for a metric.
+        Falls back to the model name if no display name is specified.
+        """
+        cfg = self.get(model)
+        return cfg.get("name") or cfg.get("display_name") or model

@@ -100,7 +100,7 @@ def main():
             failed_metrics.append((model, error_msg))
             continue
 
-    # Generate portfolio summary if requested and we have successful reports
+    # Generate portfolio summary (saved as index.html) if requested and we have successful reports
     if not args.metric and not args.no_summary and per_metric_html:
         print("\nGenerating portfolio summary...")
         try:
@@ -108,7 +108,7 @@ def main():
                 metric_reports=per_metric_html,
                 out_dir=str(out_root),
             )
-            print(f"  ✓ Summary HTML saved to: {summary_path}")
+            print(f"  ✓ Summary HTML saved to: {summary_path} (main entry point)")
         except Exception as e:
             print(f"  ✗ Failed to generate summary: {e}", file=sys.stderr)
 

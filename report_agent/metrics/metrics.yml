@@ -1,11 +1,14 @@
 metrics:
   - model: api_p2p_discv4_clients_daily
+    name: P2P Discovery Clients
     kind: time_series
     history_days: 180
 
-  - model: api_execution_transactions_active_accounts_by_sector_daily
-    kind: time_series
-    history_days: 180
+  #- model: api_execution_transactions_active_accounts_by_sector_daily
+  #  name: Active Accounts by Sector
+  #  kind: time_series
+  #  history_days: 180
 
-  - model: api_execution_transactions_active_accounts_7d
-    kind: snapshot
+  #- model: api_execution_transactions_active_accounts_7d
+  #  name: Active Accounts (7-day)
+  #  kind: snapshot
