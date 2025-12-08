@@ -12,7 +12,7 @@ This dataset is a **time-series metric** with optional segment/dimension columns
 {% if docs_filename %}- {{ docs_filename }}    (dbt docs: model + column descriptions, if available){% endif %}
 {% if has_catalog %}- model_catalog.json  (catalog of all available models in the database){% endif %}
 {% if pre_fetched_models %}
-{% for model_name, csv_file in pre_fetched_models.items() %}- {{ csv_file }}  (pre-fetched related model: {{ model_name }}){% endfor %}
+{% for model_name, csv_file in pre_fetched_models.items() %}- {{ csv_file }}  (general insight model: {{ model_name }}){% endfor %}
 {% endif %}
 
 Column conventions: `date` = time axis, `value` = main measure, `label` = segment/dimension (not numeric), `change_pct` = delta. Use schema `role` hints (time/measure/dimension/delta) with dbt docs to interpret columns.
@@ -32,16 +32,16 @@ In your final report narrative and chart titles, you MUST use natural, business-
   - Base your friendly name on: "{{ model_description }}"
 - **For chart titles**: Use short, readable names (e.g., "Active Accounts by Sector" or "P2P Client Activity") 
   - NOT the technical name like "api_execution_transactions_active_accounts_by_sector_daily"
-- **When referencing related models**: Also use friendly names, not technical model names
+- **When referencing general insight models**: Also use friendly names, not technical model names
 
 The technical model name `{{ model }}` should only appear in file paths (which are not shown to BD) and internal code comments.
 {% endif %}
 
 {% if has_catalog %}
-## Related Models & Catalog
+## General Insight Models & Catalog
 
 {% if pre_fetched_models %}
-Pre-fetched models available (load only if relevant):
+General insight models available (ecosystem-wide context, load if relevant):
 {% for model_name, csv_file in pre_fetched_models.items() %}
 - {{ model_name }}: {{ catalog.get(model_name, {}).get('description', 'No description') }} ({{ csv_file }})
 {% endfor %}
@@ -49,7 +49,7 @@ Pre-fetched models available (load only if relevant):
 
 Full model catalog (`model_catalog.json`) available. Load with `json.load(open('model_catalog.json'))` to explore all models across domains (execution, p2p, tokens, contracts, etc.).
 
-**Task**: Analyze primary metric ({{ csv_filename }}), use pre-fetched models if relevant, mention useful catalog models for future analysis.
+**Task**: Analyze primary metric ({{ csv_filename }}), use general insight models if relevant for ecosystem context, mention useful catalog models for future analysis.
 
 {% endif %}
 ## Analysis checklist (do not include in final message)
@@ -58,7 +58,7 @@ Full model catalog (`model_catalog.json`) available. Load with `json.load(open('
 3) Handle missing values/type coercions.
 4) Weekly analysis: compare last 7 days vs prior 7 days, show trend, segment breakdowns if relevant.
 {% if has_catalog %}
-5) Optional: Use related models from catalog for richer context if patterns emerge.
+5) Optional: Use general insight models for ecosystem-wide context if patterns emerge.
 {% endif %}
 
 ## Visual outputs (MANDATORY — you MUST create these plots)
@@ -110,5 +110,5 @@ Implementation notes:
 ## Guardrails
 Allowed: pandas, numpy, matplotlib, json. No network calls. File I/O: read provided files, save plots to `plots/`. Fix errors silently, keep them out of narrative.
 {% if has_catalog %}
-Use pre-fetched models if relevant. Focus on primary metric.
+Use general insight models if relevant for ecosystem context. Focus on primary metric.
 {% endif %}
