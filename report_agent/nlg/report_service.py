@@ -1,9 +1,13 @@
+import logging
+import sys
 from pathlib import Path
 from typing import Sequence
 
 from report_agent.metrics.metrics_loader import MetricsLoader
 from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.nlg.html_report import render_html_report
+
+log = logging.getLogger(__name__)
 
 
 def generate_html_report(
@@ -46,6 +50,15 @@ def generate_html_report(
         if not str(p).startswith("ERROR:")
         and str(p).lower().endswith((".png", ".jpg", ".jpeg", ".gif"))
     ]
+
+    # Validate plot generation - warn if no plots were generated
+    if not image_paths:
+        log.warning(f"⚠ No plots generated for metric '{model}'. Expected at least Figure 1 (headline weekly trend).")
+        print(f"  ⚠ WARNING: No plots generated for {model}. The LLM should have created at least Figure 1.", file=sys.stderr)
+    else:
+        log.info(f"✓ Generated {len(image_paths)} plot(s) for metric '{model}'")
+        if len(image_paths) == 1:
+            log.info(f"  Note: Only 1 plot generated. Expected 2 plots (Figure 1 mandatory, Figure 2 if segments exist).")
 
     plots_index_dir = out_root / plots_index_subdir
     plots_index_dir.mkdir(parents=True, exist_ok=True)

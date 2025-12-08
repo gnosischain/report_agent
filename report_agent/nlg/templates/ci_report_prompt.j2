@@ -15,14 +15,7 @@ This dataset is a **time-series metric** with optional segment/dimension columns
 {% for model_name, csv_file in pre_fetched_models.items() %}- {{ csv_file }}  (pre-fetched related model: {{ model_name }}){% endfor %}
 {% endif %}
 
-Column conventions (from schema + dbt docs):
-- A column named `date` is the **time axis**.
-- A column named `value` is the **main numeric measure**.
-- A column named `label` is a **segment / dimension label** (e.g. sector, project);
-  do **not** treat `label` as a numeric metric.
-- A column with role "delta" (e.g. `change_pct`) is a change vs previous period.
-- Use the `role` hints in the schema (time / measure / dimension / delta) together
-  with dbt docs to decide how to interpret columns.
+Column conventions: `date` = time axis, `value` = main measure, `label` = segment/dimension (not numeric), `change_pct` = delta. Use schema `role` hints (time/measure/dimension/delta) with dbt docs to interpret columns.
 
 {% if model_description %}
 ## Metric Context
@@ -45,97 +38,55 @@ The technical model name `{{ model }}` should only appear in file paths (which a
 {% endif %}
 
 {% if has_catalog %}
-## Pre-fetched Related Models
+## Related Models & Catalog
 
 {% if pre_fetched_models %}
-The following related models have been pre-fetched and are available for your analysis:
+Pre-fetched models available (load only if relevant):
 {% for model_name, csv_file in pre_fetched_models.items() %}
-- **{{ model_name }}** - {{ catalog.get(model_name, {}).get('description', 'No description') }} (see {{ csv_file }})
+- {{ model_name }}: {{ catalog.get(model_name, {}).get('description', 'No description') }} ({{ csv_file }})
 {% endfor %}
-
-**You decide which ones to use** - load and analyze only the models that provide useful context:
-```python
-import pandas as pd
-{% for model_name, csv_file in pre_fetched_models.items() %}
-# Load {{ model_name }} if it's relevant to your analysis
-# df_{{ model_name.replace('.', '_') }} = pd.read_csv('{{ csv_file }}')
-{% if catalog.get(model_name, {}).get('kind') == 'time_series' %}
-# df_{{ model_name.replace('.', '_') }}['date'] = pd.to_datetime(df_{{ model_name.replace('.', '_') }}['date'], errors='coerce')
-{% endif %}
-{% endfor %}
-```
-
-**Important**: Only load and analyze the pre-fetched models that are actually relevant to your analysis.
-Don't load all of them "just in case" - be selective based on what you discover in the primary metric.
-
-{% else %}
-No related models were pre-fetched for this metric.
 {% endif %}
 
-## Full Model Catalog
+Full model catalog (`model_catalog.json`) available. Load with `json.load(open('model_catalog.json'))` to explore all models across domains (execution, p2p, tokens, contracts, etc.).
 
-You also have access to the complete model catalog (`model_catalog.json`) with all available models in the database.
-
-**Your task**:
-1. Analyze the primary metric ({{ csv_filename }})
-2. Use the pre-fetched related models (uploaded above) if they provide useful context for cross-validation or deeper insights
-3. Review the catalog to understand what other models are available
-4. In your analysis, mention which additional models from the catalog would be useful for future analysis (if any)
-
-The catalog includes models across different domains (execution, p2p, tokens, contracts, etc.).
-For project/contract-specific metrics, use your semantic understanding to identify related models
-that might share business context, even if they're in different domains.
-
-### How to Use the Catalog
-
-```python
-import json
-
-# Load catalog
-with open('model_catalog.json', 'r') as f:
-    catalog = json.load(f)
-
-# Explore available models
-for name, info in catalog.items():
-    print(f"{name}: {info.get('description', '')} (domain: {info.get('domain')})")
-```
+**Task**: Analyze primary metric ({{ csv_filename }}), use pre-fetched models if relevant, mention useful catalog models for future analysis.
 
 {% endif %}
-## What to do (analysis checklist — do not include this in the final message)
-1) Load the CSV into a DataFrame `df`. Parse `df["date"] = pd.to_datetime(df["date"], errors="coerce")`.
-2) Expect **multiple rows per date** (long format). Decide column roles (time/value/segments).
-   - Aggregate as needed: e.g., sum `value` by date (and label if segmentation is useful).
-3) Handle missing values/type coercions explicitly.
-4) Analyze for a *weekly* report:
-   - Compare the most recent 7 days to the prior 7 days.
-   - Show trend over the history window.
-   - If relevant, segment breakdowns (e.g., by `label` or similar).
+## Analysis checklist (do not include in final message)
+1) Load CSV, parse `df["date"] = pd.to_datetime(df["date"], errors="coerce")`.
+2) Handle multiple rows per date (long format). Aggregate `value` by date (and `label` if segmentation useful).
+3) Handle missing values/type coercions.
+4) Weekly analysis: compare last 7 days vs prior 7 days, show trend, segment breakdowns if relevant.
 {% if has_catalog %}
-5) **Optional but encouraged**: If you notice interesting patterns, query related models from the catalog to provide richer context and cross-validation.
+5) Optional: Use related models from catalog for richer context if patterns emerge.
 {% endif %}
 
-## Visual outputs (REQUIRED — create exactly these, in this order)
-Create and **display** two figures that directly support the executive summary:
+## Visual outputs (MANDATORY — you MUST create these plots)
+**CRITICAL: You MUST actually EXECUTE Python code to generate plots. Do not just reference plots in text—you must create the PNG files.**
 
-**Figure 1 — Headline weekly total trend (last ~8–12 weeks)**
+**Figure 1 — Headline weekly total trend (MANDATORY — create this for every metric)**
+- **This plot is REQUIRED and must be created for every metric. You MUST run matplotlib code to generate this plot.**
+- **You must actually execute code like `plt.savefig('plots/{{ model }}_headline_weekly.png')` - do not skip this step.**
 - What: total (all segments) aggregated to weekly using the main `value` measure.
 - Highlight: clearly highlight the **last two weeks** (e.g., shaded span or distinct markers).
 - Annotate on the chart the WoW delta (absolute and %), e.g., "+72 (+8.2% WoW)".
 - Title: Use a short, readable name based on the metric description (e.g., "Active Accounts by Sector — Weekly total" or "P2P Client Activity — Weekly total"), NOT the technical model name "{{ model }}". Include a subtitle with the key number(s).
-- Save to `plots/{{ model }}_headline_weekly.png`, then also display it so it's cited.
+- **Execute code to save:** `plt.savefig('plots/{{ model }}_headline_weekly.png')` - this file MUST exist after your code runs.
+- Then display the plot so it's cited in your output.
 
 **Figure 2 — Last week vs prior week by top 5 segments**
 - What: grouped bars for **top 5 labels by absolute change** week-over-week.
 - Bars: last week vs previous week side-by-side; y-axis starts at 0; add exact values as labels.
 - Sort: by absolute change descending (largest mover first).
 - Title: Use a short, readable name based on the metric description (e.g., "Active Accounts by Sector — Top 5 movers" or "P2P Client Activity — Top 5 movers"), NOT the technical model name "{{ model }}".
-- Save to `plots/{{ model }}_top5_wow.png`, then also display it so it's cited.
+- **Execute code to save:** `plt.savefig('plots/{{ model }}_top5_wow.png')` - this file MUST exist after your code runs.
+- Then display the plot so it's cited in your output.
 - If there is no `label` / segment dimension, skip this figure.
 
 Implementation notes:
+- **MANDATORY STEPS:** 1) Create `plots/` directory with `os.makedirs("plots", exist_ok=True)`, 2) Generate Figure 1 using matplotlib, 3) Save with `plt.savefig()`, 4) Display the plot. Do not skip these steps.
 - Use clear axis labels, readable font sizes, and adequate figure size.
 - If there are fewer than 5 segments, use all available; if no segments, skip Figure 2.
-- `import os; os.makedirs("plots", exist_ok=True)` before saving.
 - **CRITICAL - Dark Mode Plots**: All plots MUST use a dark theme to match the report interface:
   - Set figure background to dark (e.g., `fig.patch.set_facecolor('#0b0d12')` or `plt.style.use('dark_background')`)
   - Use light-colored text and grid lines (white/light gray) for visibility
@@ -157,10 +108,7 @@ Implementation notes:
 - **CRITICAL**: Use business-friendly language throughout. Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts by sector", "P2P client activity", "transaction volume").
 
 ## Guardrails
-- Allowed imports: pandas, numpy, matplotlib, json (others only if already available).
-- No network calls. File I/O limited to reading provided files and saving plots to `plots/`.
-- On any error: fix it and continue, but keep errors out of the final narrative.
+Allowed: pandas, numpy, matplotlib, json. No network calls. File I/O: read provided files, save plots to `plots/`. Fix errors silently, keep them out of narrative.
 {% if has_catalog %}
-- Use the pre-fetched related models if they're relevant to your analysis.
-- Review the catalog to understand available models, but focus your analysis on the primary metric and pre-fetched models.
+Use pre-fetched models if relevant. Focus on primary metric.
 {% endif %}

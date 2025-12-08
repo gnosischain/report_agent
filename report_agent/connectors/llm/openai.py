@@ -120,7 +120,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         else:
             # Snapshots: ignore lookback_days/history; just fetch the snapshot table
             history = 0
-            # You will add this method to MetricsLoader (see below)
             df = loader.fetch_snapshot(model_name)
 
         if df is None or df.empty:
