@@ -14,6 +14,7 @@ from report_agent.dbt_context.from_docs_json import (
     get_model_node,
     get_column_metadata,
 )
+from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.utils.config_loader import load_configs
 
 _template_dir = files("report_agent.nlg") / "templates"
@@ -179,12 +180,27 @@ def _render_summary_page(
     """
     tpl = _env.get_template("summary_page.html.j2")
 
-    # Map metric -> html filename (relative)
-    per_metric_rel = [(m, p.name) for m, p in per_metric_reports]
+    # Get display names for all metrics
+    try:
+        registry = MetricsRegistry()
+    except Exception:
+        registry = None
+    
+    # Map metric -> (display_name, html_filename)
+    per_metric_rel = []
+    for m, p in per_metric_reports:
+        display_name = registry.get_display_name(m) if registry else m
+        per_metric_rel.append((m, display_name, p.name))
+    
+    # Get display names for highlighted metrics
+    highlighted_with_names = []
+    for metric in highlighted_metrics:
+        display_name = registry.get_display_name(metric) if registry else metric
+        highlighted_with_names.append((metric, display_name))
 
     html = tpl.render(
         summary_html=summary_html,
-        highlighted_metrics=highlighted_metrics,
+        highlighted_metrics=highlighted_with_names,
         per_metric_reports=per_metric_rel,
         plots_by_metric=plots_by_metric,
     )
@@ -235,9 +251,11 @@ def generate_portfolio_summary(
 
     summary_html = markdown.markdown(summary_markdown, extensions=["extra"])
 
+    # Collect plots for highlighted metrics (use model names for file lookup)
     plots_by_metric = _collect_plots_for_metrics(highlighted, out_root)
 
-    summary_path = out_root / "portfolio_summary.html"
+    # Save as index.html to make it the main entry point
+    summary_path = out_root / "index.html"
     return _render_summary_page(
         summary_html=summary_html,
         highlighted_metrics=highlighted,

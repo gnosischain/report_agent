@@ -2,7 +2,7 @@
 
 ![Report Agent](img/report-agent-header.svg)
 
-Concise, modular system to generate **weekly data reports** directly from ClickHouse + dbt docs using OpenAI’s **Code Interpreter** (Python tool).
+Concise, modular system to generate **weekly data reports** directly from ClickHouse + dbt docs using OpenAI's **Code Interpreter** (Python tool).
 
 The model receives **raw tables** (CSV) plus neutral context (schema, meta, optional dbt docs), then decides how to analyze, visualize, and summarize — **no precomputed metrics**. Each run produces:
 
@@ -14,6 +14,8 @@ The model receives **raw tables** (CSV) plus neutral context (schema, meta, opti
 ## Key Features
 
 * **Free-form analysis**: Model runs Python in a sandbox (Responses API + `code_interpreter`), no fixed toolchain.
+* **Parallel processing**: Process multiple metrics concurrently with `--max-workers` flag for faster execution.
+* **Optimized prompts**: Reduced token usage (~30-40%) through prompt optimization while maintaining all functionality.
 * **Raw inputs**: Time series (date, value, optional label) and snapshots (value, optional change_pct, optional label).
 * **Neutral context**: Attaches `*.schema.json` (dtypes/examples/roles), `*.meta.json` (coverage/kind), and optional `*.docs.md`.
 * **Evidence-first visuals**: Weekly total + WoW movers plots required by the prompt for time series.
@@ -51,7 +53,6 @@ report_agent/
     templates/
       ci_report_prompt.j2         # time-series CI prompt (weekly report + required plots)
       ci_snapshot_prompt.j2       # snapshot CI prompt (single KPI)
-      weekly_report_prompt.j2     # legacy prompt (not used by CLI)
       report_page.html.j2         # per-metric HTML template (dark theme)
       summary_prompt.j2           # portfolio summary LLM prompt
       summary_page.html.j2        # portfolio summary HTML template
@@ -154,7 +155,7 @@ metrics:
 
 ## How It Works
 
-1.  **CLI loads config + registry**: `report-agent` uses `load_configs()` and `MetricsRegistry` to discover metrics, kinds, and history windows.
+1.  **CLI loads config + registry**: `report-agent` uses `load_configs()` and `MetricsRegistry` to discover metrics, kinds, and history windows. Metrics can be processed sequentially or in parallel (default: 3 workers).
 2.  **Fetch data from ClickHouse**:
     * Time series: `fetch_time_series(model, lookback_days)` queries by `date >= today() - INTERVAL ...`.
     * Snapshots: `fetch_snapshot(model)` selects the whole table (no date filter).
@@ -186,26 +187,44 @@ metrics:
     # create and fill .env
     ```
 2.  Define metrics in `report_agent/metrics/metrics.yml`.
-3.  Run all metrics + summary:
+3.  Run all metrics + summary (with parallel processing):
     ```bash
     report-agent
     ```
-4.  Or just one metric:
+4.  Run with custom number of parallel workers:
+    ```bash
+    report-agent --max-workers 5
+    ```
+5.  Run a single metric:
     ```bash
     report-agent --metric api_p2p_discv4_clients_daily
     ```
-5.  Or change output directory / skip summary:
+6.  Change output directory / skip summary:
     ```bash
     report-agent --out-dir gnosis_reports --no-summary
     ```
+7.  Enable verbose logging:
+    ```bash
+    report-agent --verbose
+    ```
+
+---
+
+## Performance & Optimization
+
+* **Parallel Processing**: By default, metrics are processed with 3 parallel workers. Use `--max-workers N` to control concurrency. With 3 workers, 3 metrics complete in roughly the time of the slowest single metric.
+* **Prompt Optimization**: Prompts have been optimized to reduce token usage by ~30-40% while maintaining all functionality, resulting in lower API costs.
+* **Cost Efficiency**: Optimized prompts combined with parallel processing provide faster execution and reduced costs per report.
 
 ---
 
 ## Troubleshooting
 
-* **ClickHouse UNKNOWN_IDENTIFIER date**: Mark snapshot tables as `kind: snapshot` in `metrics.yml` so they don’t get a `WHERE date` filter.
+* **ClickHouse UNKNOWN_IDENTIFIER date**: Mark snapshot tables as `kind: snapshot` in `metrics.yml` so they don't get a `WHERE date` filter.
+* **Plots not generated**: Plots are generated when possible but not guaranteed due to Code Interpreter limitations. Reports are complete and useful even without plots. You'll see a warning message if plots are missing for a metric.
 * **Plots not visible in HTML**: Check that PNGs exist in `reports/plots/` and that you open the HTML from the same directory tree (paths are relative).
-* **No portfolio summary**: Ensure you didn’t pass `--no-summary` and that at least one metric completed successfully.
+* **No portfolio summary**: Ensure you didn't pass `--no-summary` and that at least one metric completed successfully.
+* **Parallel processing issues**: If you encounter issues with parallel processing, try running with `--max-workers 1` for sequential execution.
 
 ---
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -11,6 +12,8 @@ import httpx
 import pandas as pd
 from openai import OpenAI
 
+log = logging.getLogger(__name__)
+
 from report_agent.connectors.llm.base import LLMConnector
 from report_agent.metrics.metrics_loader import MetricsLoader
 from report_agent.metrics.metrics_registry import MetricsRegistry
@@ -19,6 +22,8 @@ from report_agent.dbt_context.from_docs_json import (
     load_manifest,
     get_model_node,
     get_column_metadata,
+    build_model_catalog,
+    save_catalog_to_file,
 )
 from report_agent.utils.config_loader import load_configs
 
@@ -41,6 +46,8 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         self._api_key = api_key  # keep for HTTP fallback downloads
         self.tools = [{"type": "code_interpreter", "container": {"type": "auto"}}]
         self._last_artifacts: Optional[dict] = None
+        self._last_dataframe: Optional[pd.DataFrame] = None
+        self._last_model_name: Optional[str] = None
 
     # ---- Tools API (no-op here) ----
 
@@ -112,7 +119,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         else:
             # Snapshots: ignore lookback_days/history; just fetch the snapshot table
             history = 0
-            # You will add this method to MetricsLoader (see below)
             df = loader.fetch_snapshot(model_name)
 
         if df is None or df.empty:
@@ -121,6 +127,10 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         # For time series, we require a date column; for snapshots we allow tables without date
         if kind == "time_series" and "date" not in df.columns:
             return f"Model '{model_name}' has no 'date' column; cannot proceed."
+
+        # Store the dataframe for potential reuse (e.g., saving CSV without re-fetching)
+        self._last_dataframe = df.copy()  # Store a copy to avoid mutations
+        self._last_model_name = model_name
 
         # 2) Prepare files (CSV + schema + meta + optional docs)
         tmpdir = tempfile.mkdtemp(prefix=f"{model_name.replace('.', '_')}_")
@@ -177,6 +187,60 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             # Silent fallback; schema/meta/CSV are enough
             pass
 
+        # Build model catalog and pre-fetch general insight models (server-side, secure)
+        catalog_filename = None
+        pre_fetched_models = {}
+        catalog = {}
+        try:
+            # Build model catalog for model_catalog.json (optional context for LLM)
+            catalog = build_model_catalog(cfg)
+            if catalog:
+                catalog_path = os.path.join(tmpdir, "model_catalog.json")
+                save_catalog_to_file(catalog, catalog_path)
+                catalog_filename = "model_catalog.json"
+            
+            # Pre-fetch fixed general insight models (always the same 5 models for ecosystem context)
+            general_insight_models = registry.get_general_insight_models()
+            if general_insight_models:
+                log.info(f"Pre-fetching {len(general_insight_models)} general insight models: {general_insight_models}")
+                
+                for insight_model_name in general_insight_models:
+                    try:
+                        # Determine if it's time_series or snapshot from catalog if available
+                        is_time_series = True
+                        if catalog and insight_model_name in catalog:
+                            is_time_series = catalog[insight_model_name].get("kind") == "time_series"
+                        
+                        # Fetch data (30 days for time series, full table for snapshots)
+                        if is_time_series:
+                            sql = f"""
+                                SELECT *
+                                FROM {loader.db.read.database}.{insight_model_name}
+                                WHERE date >= today() - INTERVAL 30 DAY
+                                ORDER BY date ASC
+                            """
+                            df_insight = loader.db.fetch_df(sql)
+                        else:
+                            sql = f"SELECT * FROM {loader.db.read.database}.{insight_model_name}"
+                            df_insight = loader.db.fetch_df(sql)
+                        
+                        insight_csv_path = os.path.join(tmpdir, f"{insight_model_name}.csv")
+                        df_insight.to_csv(insight_csv_path, index=False)
+                        pre_fetched_models[insight_model_name] = os.path.basename(insight_csv_path)
+                        log.info(f"  ✓ Pre-fetched {insight_model_name} ({len(df_insight)} rows)")
+                    except Exception as e:
+                        # Skip if can't fetch (model might not exist or have issues)
+                        log.warning(f"  ✗ Failed to pre-fetch {insight_model_name}: {e}")
+                        pass
+                
+                if pre_fetched_models:
+                    log.info(f"Pre-fetched {len(pre_fetched_models)}/{len(general_insight_models)} general insight models: {list(pre_fetched_models.keys())}")
+                else:
+                    log.info(f"No general insight models successfully pre-fetched")
+        except Exception as e:
+            # Log but don't fail - catalog and pre-fetching are optional
+            log.warning(f"Could not build model catalog or pre-fetch general insight models: {e}")
+
         # 3) Build the free-form prompt (template depends on kind)
         prompt = build_ci_prompt(
             model=model_name,
@@ -186,6 +250,9 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             schema_filename=os.path.basename(schema_path),
             meta_filename=os.path.basename(meta_path),
             docs_filename=docs_filename,
+            has_catalog=bool(catalog_filename),
+            pre_fetched_models=pre_fetched_models,
+            catalog=catalog if catalog_filename else None,
         )
 
         # 4) Upload files and collect file_ids for the container
@@ -204,7 +271,28 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             with open(docs_path, "rb") as f_docs:
                 docs_file = self.client.files.create(file=f_docs, purpose="assistants")
                 file_ids.append(docs_file.id)
-
+        
+        # Upload catalog if available
+        if catalog_filename:
+            catalog_path = os.path.join(tmpdir, catalog_filename)
+            with open(catalog_path, "rb") as f_catalog:
+                catalog_file = self.client.files.create(file=f_catalog, purpose="assistants")
+                file_ids.append(catalog_file.id)
+        
+        # Upload pre-fetched general insight model CSVs (server-side fetched, secure)
+        # Track file_id -> model_name and filename -> model_name mappings for usage detection
+        pre_fetched_file_ids: dict[str, str] = {}  # file_id -> model_name
+        pre_fetched_filenames: dict[str, str] = {}  # filename -> model_name
+        if pre_fetched_models:
+            log.info(f"Uploading {len(pre_fetched_models)} general insight models to container")
+            for insight_name, csv_filename in pre_fetched_models.items():
+                insight_csv_path = os.path.join(tmpdir, csv_filename)
+                with open(insight_csv_path, "rb") as f_insight:
+                    insight_file = self.client.files.create(file=f_insight, purpose="assistants")
+                    file_ids.append(insight_file.id)
+                    pre_fetched_file_ids[insight_file.id] = insight_name
+                    pre_fetched_filenames[csv_filename] = insight_name
+        
         # 5) Create the response with a code_interpreter container that includes these files
         tools = [
             {
@@ -241,6 +329,8 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         # 6) Return final text (try several shapes)
         text = getattr(resp, "output_text", None)
         if isinstance(text, str) and text.strip():
+            # Check if any pre-fetched models were used in the analysis
+            self._check_pre_fetched_usage(text, pre_fetched_models, pre_fetched_file_ids, pre_fetched_filenames)
             return text
 
         try:
@@ -257,12 +347,87 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                             if getattr(c, "type", None) in ("output_text", "text"):
                                 parts.append(getattr(c, "text", ""))
             if parts:
-                return "\n".join(p for p in parts if p)
+                text = "\n".join(p for p in parts if p)
+                self._check_pre_fetched_usage(text, pre_fetched_models, pre_fetched_file_ids, pre_fetched_filenames)
+                return text
         except Exception:
             pass
 
         # Last resort
-        return str(resp)
+        text = str(resp)
+        # Check if any pre-fetched models were used in the analysis
+        self._check_pre_fetched_usage(text, pre_fetched_models, pre_fetched_file_ids, pre_fetched_filenames)
+        return text
+
+    def _check_pre_fetched_usage(
+        self, 
+        text: str, 
+        pre_fetched_models: dict, 
+        pre_fetched_file_ids: dict[str, str],
+        pre_fetched_filenames: dict[str, str]
+    ):
+        """
+        Check if any pre-fetched models were used as context in the LLM analysis.
+        
+        Uses two detection methods:
+        1. Container file citations (reliable) - files explicitly referenced by the LLM
+        2. Text mentions (fallback) - model names or CSV filenames in narrative
+        
+        Args:
+            text: The LLM output text
+            pre_fetched_models: Dict mapping model_name -> csv_filename
+            pre_fetched_file_ids: Dict mapping file_id -> model_name for pre-fetched models
+            pre_fetched_filenames: Dict mapping filename -> model_name for pre-fetched models
+        """
+        if not pre_fetched_models:
+            return
+        
+        # Method 1: Check container file citations (most reliable)
+        # Files that were explicitly accessed/cited by the LLM
+        cited_models = set()
+        artifacts = self._last_artifacts or {}
+        total_cited_files = len(artifacts.get("files", []))
+        
+        for file_info in artifacts.get("files", []):
+            file_id = file_info.get("file_id")
+            filename = file_info.get("filename", "unknown")
+            
+            # Try matching by file_id first
+            if file_id and file_id in pre_fetched_file_ids:
+                cited_models.add(pre_fetched_file_ids[file_id])
+            # Also try matching by filename (in case container uses different file_ids)
+            elif filename and filename in pre_fetched_filenames:
+                cited_models.add(pre_fetched_filenames[filename])
+        
+        # Method 2: Check text output (fallback - may miss usage due to business-friendly language)
+        text_mentioned_models = []
+        if text:
+            text_lower = text.lower()
+            for model_name, csv_filename in pre_fetched_models.items():
+                if model_name.lower() in text_lower or csv_filename.lower() in text_lower:
+                    text_mentioned_models.append(model_name)
+        
+        # Combine both methods
+        all_used_models = cited_models | set(text_mentioned_models)
+        
+        if all_used_models:
+            detection_methods = []
+            if cited_models:
+                detection_methods.append(f"file citations ({len(cited_models)})")
+            if text_mentioned_models:
+                detection_methods.append(f"text mentions ({len(text_mentioned_models)})")
+            
+            log.info(
+                f"✓ LLM used {len(all_used_models)}/{len(pre_fetched_models)} pre-fetched models as context: {sorted(all_used_models)} "
+                f"[detected via: {', '.join(detection_methods)}]"
+            )
+        else:
+            # More informative message about what was checked
+            citation_info = f"({total_cited_files} files cited in response, none matched pre-fetched models)"
+            log.info(
+                f"⚠ LLM did not appear to use any of the {len(pre_fetched_models)} pre-fetched models: {list(pre_fetched_models.keys())} "
+                f"{citation_info}"
+            )
 
     # ---------- Artifacts (citations) ----------
 
@@ -322,6 +487,25 @@ class OpenAICodeInterpreterConnector(LLMConnector):
     def get_last_artifacts(self):
         """Return artifacts collected from the most recent run (or None)."""
         return getattr(self, "_last_artifacts", None)
+
+    def get_last_dataframe(self, model_name: str) -> Optional[pd.DataFrame]:
+        """
+        Return the dataframe from the most recent run if it matches the model.
+        
+        This allows callers to reuse the dataframe that was already fetched for LLM processing,
+        avoiding duplicate database queries.
+        
+        Args:
+            model_name: The model name to check against
+            
+        Returns:
+            DataFrame if available and matches model, None otherwise
+        """
+        if getattr(self, "_last_model_name", None) == model_name:
+            df = getattr(self, "_last_dataframe", None)
+            if df is not None:
+                return df.copy()  # Return a copy to avoid mutations
+        return None
 
     # ---------- Downloads ----------
 

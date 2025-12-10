@@ -32,8 +32,11 @@ class MetricsLoader:
         Fetch a snapshot metric table (no date filter).
         Used for metrics with kind: snapshot in metrics.yml.
         """
+        if not self.registry.has(model):
+            raise KeyError(f"Unknown metric {model}")
+
         sql = f"""
             SELECT *
-            FROM dbt.{model}
+            FROM {self.db.read.database}.{model}
         """
         return self.db.fetch_df(sql)

@@ -1,9 +1,13 @@
+import logging
+import sys
 from pathlib import Path
 from typing import Sequence
 
 from report_agent.metrics.metrics_loader import MetricsLoader
 from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.nlg.html_report import render_html_report
+
+log = logging.getLogger(__name__)
 
 
 def generate_html_report(
@@ -47,6 +51,15 @@ def generate_html_report(
         and str(p).lower().endswith((".png", ".jpg", ".jpeg", ".gif"))
     ]
 
+    # Validate plot generation - warn if no plots were generated
+    if not image_paths:
+        log.warning(f"⚠ No plots generated for metric '{model}'. Expected at least Figure 1 (headline weekly trend).")
+        print(f"  ⚠ WARNING: No plots generated for {model}. The LLM should have created at least Figure 1.", file=sys.stderr)
+    else:
+        log.info(f"✓ Generated {len(image_paths)} plot(s) for metric '{model}'")
+        if len(image_paths) == 1:
+            log.info(f"  Note: Only 1 plot generated. Expected 2 plots (Figure 1 mandatory, Figure 2 if segments exist).")
+
     plots_index_dir = out_root / plots_index_subdir
     plots_index_dir.mkdir(parents=True, exist_ok=True)
     plots_index_path = plots_index_dir / f"{model}.txt"
@@ -55,16 +68,23 @@ def generate_html_report(
     else:
         plots_index_path.write_text("", encoding="utf-8")
 
-    reg = MetricsRegistry()
-    kind = reg.get_kind(model)
-
-    loader = MetricsLoader()
-    if kind == "time_series":
-        hist = reg.get_history_days(model)
-        df = loader.fetch_time_series(model, lookback_days=hist)
-    else:
-        hist = 0
-        df = loader.fetch_snapshot(model)
+    # Try to reuse the dataframe that was already fetched for LLM processing
+    # This avoids duplicate database queries
+    df = None
+    if hasattr(connector, "get_last_dataframe"):
+        df = connector.get_last_dataframe(model)
+    
+    # If dataframe not available from connector, fetch it (backward compatible)
+    if df is None:
+        reg = MetricsRegistry()
+        kind = reg.get_kind(model)
+        
+        loader = MetricsLoader()
+        if kind == "time_series":
+            hist = reg.get_history_days(model)
+            df = loader.fetch_time_series(model, lookback_days=hist)
+        else:
+            df = loader.fetch_snapshot(model)
 
     data_dir = out_root / data_subdir
     data_dir.mkdir(parents=True, exist_ok=True)

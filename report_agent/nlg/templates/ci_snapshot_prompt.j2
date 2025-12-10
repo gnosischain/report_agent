@@ -15,12 +15,75 @@ This dataset is a **snapshot metric**, not a long time series. Typical columns:
 - {{ schema_filename }}  (JSON schema with dtype hints, roles & small example values)
 - {{ meta_filename }}    (row/column counts; includes a `kind` field of "snapshot")
 {% if docs_filename %}- {{ docs_filename }}    (dbt docs: model + column descriptions, if available){% endif %}
+{% if has_catalog %}- model_catalog.json  (catalog of all available models in the database){% endif %}
+{% if pre_fetched_models %}
+{% for model_name, csv_file in pre_fetched_models.items() %}- {{ csv_file }}  (pre-fetched related model: {{ model_name }}){% endfor %}
+{% endif %}
 
 Column conventions (from schema + dbt docs):
 - A column named `value` with role "measure" is the main KPI.
 - A column named `label` with role "dimension" is a segment / category, not a metric.
 - A column named `change_pct` or with role "delta" is a change vs previous window.
 
+{% if model_description %}
+## Metric Context
+
+This metric represents: **{{ model_description }}**
+
+**CRITICAL: Use Business-Friendly Language**
+
+In your final report narrative and chart titles, you MUST use natural, business-friendly language instead of technical model names:
+
+- **DO NOT** use the technical model name `{{ model }}` anywhere in your narrative text
+- **DO** use descriptive, readable phrases based on the metric description
+  - Examples: "Active accounts", "P2P client count", "Transaction volume", "Execution layer metrics"
+  - Base your friendly name on: "{{ model_description }}"
+- **For chart titles**: Use short, readable names (e.g., "Active Accounts" or "P2P Client Count") 
+  - NOT the technical name like "api_execution_transactions_active_accounts_7d"
+- **When referencing related models**: Also use friendly names, not technical model names
+
+The technical model name `{{ model }}` should only appear in file paths (which are not shown to BD) and internal code comments.
+{% endif %}
+
+{% if has_catalog %}
+## Pre-fetched Related Models
+
+{% if pre_fetched_models %}
+The following related models have been pre-fetched and are available for your analysis:
+{% for model_name, csv_file in pre_fetched_models.items() %}
+- **{{ model_name }}** - {{ catalog.get(model_name, {}).get('description', 'No description') }} (see {{ csv_file }})
+{% endfor %}
+
+**You decide which ones to use** - load and analyze only the models that provide useful context:
+```python
+import pandas as pd
+{% for model_name, csv_file in pre_fetched_models.items() %}
+# Load {{ model_name }} if it's relevant to your analysis
+# df_{{ model_name.replace('.', '_') }} = pd.read_csv('{{ csv_file }}')
+{% if catalog.get(model_name, {}).get('kind') == 'time_series' %}
+# df_{{ model_name.replace('.', '_') }}['date'] = pd.to_datetime(df_{{ model_name.replace('.', '_') }}['date'], errors='coerce')
+{% endif %}
+{% endfor %}
+```
+
+**Important**: Only load and analyze the pre-fetched models that are actually relevant to your analysis.
+Don't load all of them "just in case" - be selective based on what you discover in the snapshot.
+
+{% else %}
+No related models were pre-fetched for this snapshot.
+{% endif %}
+
+## Full Model Catalog
+
+You also have access to the complete model catalog (`model_catalog.json`) with all available models.
+
+**Your task**:
+1. Analyze the snapshot metric ({{ csv_filename }})
+2. Use the pre-fetched related models (uploaded above) if they help validate the snapshot against trends
+3. Review the catalog to understand what other models are available
+4. In your analysis, mention which additional models from the catalog would be useful for future analysis (if any)
+
+{% endif %}
 ## What to do (analysis checklist — do not include this in the final message)
 1) Load the CSV into a DataFrame `df` and inspect its columns and dtypes.
 2) Identify the main KPI (`value`) and any `change_pct` column.
@@ -30,6 +93,9 @@ Column conventions (from schema + dbt docs):
 4) Decide whether to:
    - aggregate across segments (e.g. total or average value),
    - or focus on a small number of key segments.
+{% if has_catalog %}
+5) **Optional**: Use the pre-fetched related models to validate the snapshot against trends or provide context.
+{% endif %}
 
 ## Visual outputs (OPTIONAL but encouraged)
 Create up to **one or two** simple charts that help BD interpret the snapshot:
@@ -41,8 +107,14 @@ Create up to **one or two** simple charts that help BD interpret the snapshot:
   - you may show `change_pct` by `label` or as a single annotated number.
 
 If you create plots:
+- Title: Use a short, readable name based on the metric description (e.g., "Active Accounts" or "P2P Client Count"), NOT the technical model name "{{ model }}".
 - Save them under `plots/{{ model }}_*.png` and display them so they are cited.
 - `import os; os.makedirs("plots", exist_ok=True)` before saving.
+- **CRITICAL - Dark Mode Plots**: All plots MUST use a dark theme to match the report interface:
+  - Set figure background to dark (e.g., `fig.patch.set_facecolor('#0b0d12')` or `plt.style.use('dark_background')`)
+  - Use light-colored text and grid lines (white/light gray) for visibility
+  - Use bright, high-contrast colors for data series (avoid dark colors)
+  - Example: `plt.style.use('dark_background')` or manually set `facecolor='#0b0d12'`, `text.color='#e7edf3'`, `axes.facecolor='#121722'`
 
 If there is no meaningful visual to add, you may skip charts entirely.
 
@@ -64,3 +136,5 @@ Write a concise BD-facing summary (≈100–200 words), with:
 
 Do **not** include code, logs, or step-by-step narration. Focus on a clear,
 decision-oriented explanation of the snapshot.
+
+**CRITICAL**: Use business-friendly language throughout. Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts", "P2P client count", "transaction volume").
