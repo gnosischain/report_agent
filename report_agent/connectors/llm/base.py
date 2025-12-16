@@ -1,4 +1,4 @@
-# report_agent/connectors/llm_connector/base.py
+# report_agent/connectors/llm/base.py
 from __future__ import annotations
 
 from abc import ABC, abstractmethod

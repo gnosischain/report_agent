@@ -23,9 +23,6 @@ class MetricsRegistry:
                 raise FileNotFoundError(f"Missing metrics YAML at {path}")
             raw = yaml.safe_load(path.read_text()) or {}
             metrics_cfg = raw.get("metrics", [])
-            self._general_insight_models = raw.get("general_insight_models", [])
-        else:
-            self._general_insight_models = []
 
         self._by_model: Dict[str, Dict[str, Any]] = {}
         for m in metrics_cfg:
@@ -62,10 +59,3 @@ class MetricsRegistry:
         """
         cfg = self.get(model)
         return cfg.get("name") or cfg.get("display_name") or model
-    
-    def get_general_insight_models(self) -> List[str]:
-        """
-        Return the list of general insight models that should always be pre-fetched
-        for context, regardless of which metric is being analyzed.
-        """
-        return self._general_insight_models.copy() if self._general_insight_models else []

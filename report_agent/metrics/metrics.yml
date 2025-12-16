@@ -32,10 +32,3 @@ metrics:
   #- model: api_execution_transactions_active_accounts_7d
   #  name: Active Accounts (7-day)
   #  kind: snapshot
-
-general_insight_models:
-  - api_execution_transactions_7d
-  - api_execution_transactions_active_accounts_7d
-  - api_execution_transactions_fees_native_7d
-  - api_p2p_clients_latest
-  - api_bridges_kpi_netflow_7d

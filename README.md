@@ -7,7 +7,7 @@ Concise, modular system to generate **weekly data reports** directly from ClickH
 The model receives **raw tables** (CSV) plus neutral context (schema, meta, optional dbt docs), then decides how to analyze, visualize, and summarize — **no precomputed metrics**. Each run produces:
 
 * Per-metric HTML reports with BD-friendly narrative and plots.
-* An optional portfolio summary HTML that highlights the most important metrics.
+* A unified weekly report HTML that synthesizes findings across all metrics.
 
 ---
 
@@ -49,13 +49,13 @@ report_agent/
     prompt_builder.py             # builds CI prompts (time_series vs snapshot)
     html_report.py                # render per-metric HTML
     report_service.py             # run CI -> download plots -> save CSV/text -> HTML
-    summary_service.py            # cross-metric portfolio summary (2–4 highlighted metrics)
+    summary_service.py            # unified weekly report synthesizing all metrics
     templates/
       ci_report_prompt.j2         # time-series CI prompt (weekly report + required plots)
       ci_snapshot_prompt.j2       # snapshot CI prompt (single KPI)
       report_page.html.j2         # per-metric HTML template (dark theme)
-      summary_prompt.j2           # portfolio summary LLM prompt
-      summary_page.html.j2        # portfolio summary HTML template
+      summary_prompt.j2           # weekly report LLM prompt
+      summary_page.html.j2        # weekly report HTML template
 
   utils/
     config_loader.py              # loads .env and returns config dict
@@ -173,9 +173,9 @@ metrics:
     * Plots → downloaded via `download_artifacts()` into `reports/plots/`
     * Data → `reports/data/<model>.csv`
     * Per-metric HTML → `html_report.render_html_report()` writes `YYYY-MM-DD_<model>.html`
-6.  **Portfolio summary (optional)**:
-    * Uses `summary_service.generate_portfolio_summary()` on the collected metric texts + dbt docs.
-    * LLM picks 2–4 key metrics and writes a portfolio-level summary.
+6.  **Weekly report (optional)**:
+    * Uses `summary_service.generate_weekly_report()` on the collected metric texts + dbt docs.
+    * LLM synthesizes findings across all metrics and creates a unified weekly report.
 
 ---
 
@@ -223,7 +223,7 @@ metrics:
 * **ClickHouse UNKNOWN_IDENTIFIER date**: Mark snapshot tables as `kind: snapshot` in `metrics.yml` so they don't get a `WHERE date` filter.
 * **Plots not generated**: Plots are generated when possible but not guaranteed due to Code Interpreter limitations. Reports are complete and useful even without plots. You'll see a warning message if plots are missing for a metric.
 * **Plots not visible in HTML**: Check that PNGs exist in `reports/plots/` and that you open the HTML from the same directory tree (paths are relative).
-* **No portfolio summary**: Ensure you didn't pass `--no-summary` and that at least one metric completed successfully.
+* **No weekly report**: Ensure you didn't pass `--no-summary` and that at least one metric completed successfully.
 * **Parallel processing issues**: If you encounter issues with parallel processing, try running with `--max-workers 1` for sequential execution.
 
 ---

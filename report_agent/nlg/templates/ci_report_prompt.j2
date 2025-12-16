@@ -108,6 +108,7 @@ Analyze this metric to determine if anything significant happened **in the last 
 **Key Questions to Answer:**
 - Is there anything noteworthy in the last complete week? (Significance: HIGH/MEDIUM/LOW/NONE)
 - What changed? (magnitude, direction, historical context)
+- **CRITICAL: Historical context analysis**: How does this week compare to recent weeks, months, and longer-term patterns? Is this change unusual or part of a trend? Compare to: previous week, 4-week average, 3-month average, same period last month, any notable historical patterns. This historical analysis is essential for understanding significance.
 - Why does it matter? (business impact, trends, anomalies)
 - What patterns or anomalies do you see?
 - What evidence supports your findings?
@@ -115,14 +116,15 @@ Analyze this metric to determine if anything significant happened **in the last 
 **Output Format:**
 Structure your findings in whatever way best communicates what you discovered. You might include:
 - A significance assessment (HIGH/MEDIUM/LOW/NONE) - **REQUIRED**
-- Change analysis with historical context (week-over-week comparing complete weeks only, comparison to recent weeks/months)
+- Change analysis with **strong historical context** (week-over-week comparing complete weeks only, comparison to recent weeks/months, longer-term trends, whether this is unusual or part of a pattern)
 - Key insights or patterns (trends, anomalies, notable observations)
 - Supporting data/calculations (specific numbers, comparisons, calculations)
 - Segment breakdowns (if relevant - which segments drove changes)
 
 **Important Guidelines:**
 - **CRITICAL: Only report when significant**: If significance is LOW or NONE, provide ONLY the significance assessment (e.g., "Significance: LOW" or "Significance: NONE") and optionally one brief sentence. Do NOT provide detailed analysis, change analysis, or insights for LOW/NONE significance metrics. The weekly report will skip these entirely.
-- **For HIGH/MEDIUM significance only**: Provide full analytical findings including change analysis, insights, and supporting data.
+- **For HIGH/MEDIUM significance only**: Provide full analytical findings including change analysis, **detailed historical context**, insights, and supporting data.
+- **Historical context is essential**: Always analyze how this week compares to historical patterns. Include comparisons like: "largest change in X weeks/months", "continuing a Y-week trend", "returning to levels seen in [period]", "X% deviation from 3-month average", "unusual compared to recent patterns". This context is critical for understanding significance.
 - **If multiple significant things happened**: Structure your findings accordingly - don't force a rigid format.
 - **Focus on analytical reasoning**: Provide evidence-based analysis, not polished BD prose. The weekly report will handle BD-friendly synthesis.
 - **Include specific numbers**: Always include actual values, percentages, comparisons to historical periods (but only for HIGH/MEDIUM significance).

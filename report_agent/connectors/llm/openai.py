@@ -241,10 +241,7 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                 catalog_file = self.client.files.create(file=f_catalog, purpose="assistants")
                 file_ids.append(catalog_file.id)
         
-        # Track file_id -> model_name and filename -> model_name mappings for usage detection
-        # (Empty for per-metric reports - general insight models not included)
-        pre_fetched_file_ids: dict[str, str] = {}  # file_id -> model_name
-        pre_fetched_filenames: dict[str, str] = {}  # filename -> model_name
+        # Note: General insight models are not used for per-metric reports
         
         # 5) Create the response with a code_interpreter container that includes these files
         tools = [
@@ -282,8 +279,6 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         # 6) Return final text (try several shapes)
         text = getattr(resp, "output_text", None)
         if isinstance(text, str) and text.strip():
-            # Check if any pre-fetched models were used in the analysis
-            self._check_pre_fetched_usage(text, pre_fetched_models, pre_fetched_file_ids, pre_fetched_filenames)
             return text
 
         try:
@@ -301,86 +296,13 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                                 parts.append(getattr(c, "text", ""))
             if parts:
                 text = "\n".join(p for p in parts if p)
-                self._check_pre_fetched_usage(text, pre_fetched_models, pre_fetched_file_ids, pre_fetched_filenames)
                 return text
         except Exception:
             pass
 
         # Last resort
         text = str(resp)
-        # Check if any pre-fetched models were used in the analysis
-        self._check_pre_fetched_usage(text, pre_fetched_models, pre_fetched_file_ids, pre_fetched_filenames)
         return text
-
-    def _check_pre_fetched_usage(
-        self, 
-        text: str, 
-        pre_fetched_models: dict, 
-        pre_fetched_file_ids: dict[str, str],
-        pre_fetched_filenames: dict[str, str]
-    ):
-        """
-        Check if any pre-fetched models were used as context in the LLM analysis.
-        
-        Uses two detection methods:
-        1. Container file citations (reliable) - files explicitly referenced by the LLM
-        2. Text mentions (fallback) - model names or CSV filenames in narrative
-        
-        Args:
-            text: The LLM output text
-            pre_fetched_models: Dict mapping model_name -> csv_filename
-            pre_fetched_file_ids: Dict mapping file_id -> model_name for pre-fetched models
-            pre_fetched_filenames: Dict mapping filename -> model_name for pre-fetched models
-        """
-        if not pre_fetched_models:
-            return
-        
-        # Method 1: Check container file citations (most reliable)
-        # Files that were explicitly accessed/cited by the LLM
-        cited_models = set()
-        artifacts = self._last_artifacts or {}
-        total_cited_files = len(artifacts.get("files", []))
-        
-        for file_info in artifacts.get("files", []):
-            file_id = file_info.get("file_id")
-            filename = file_info.get("filename", "unknown")
-            
-            # Try matching by file_id first
-            if file_id and file_id in pre_fetched_file_ids:
-                cited_models.add(pre_fetched_file_ids[file_id])
-            # Also try matching by filename (in case container uses different file_ids)
-            elif filename and filename in pre_fetched_filenames:
-                cited_models.add(pre_fetched_filenames[filename])
-        
-        # Method 2: Check text output (fallback - may miss usage due to business-friendly language)
-        text_mentioned_models = []
-        if text:
-            text_lower = text.lower()
-            for model_name, csv_filename in pre_fetched_models.items():
-                if model_name.lower() in text_lower or csv_filename.lower() in text_lower:
-                    text_mentioned_models.append(model_name)
-        
-        # Combine both methods
-        all_used_models = cited_models | set(text_mentioned_models)
-        
-        if all_used_models:
-            detection_methods = []
-            if cited_models:
-                detection_methods.append(f"file citations ({len(cited_models)})")
-            if text_mentioned_models:
-                detection_methods.append(f"text mentions ({len(text_mentioned_models)})")
-            
-            log.info(
-                f"✓ LLM used {len(all_used_models)}/{len(pre_fetched_models)} pre-fetched models as context: {sorted(all_used_models)} "
-                f"[detected via: {', '.join(detection_methods)}]"
-            )
-        else:
-            # More informative message about what was checked
-            citation_info = f"({total_cited_files} files cited in response, none matched pre-fetched models)"
-            log.info(
-                f"⚠ LLM did not appear to use any of the {len(pre_fetched_models)} pre-fetched models: {list(pre_fetched_models.keys())} "
-                f"{citation_info}"
-            )
 
     # ---------- Artifacts (citations) ----------
 
