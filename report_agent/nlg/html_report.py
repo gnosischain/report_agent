@@ -109,7 +109,7 @@ def generate_index_page(
     
     Args:
         out_dir: Base output directory containing HTML reports
-        summary_path: Optional path to portfolio summary (relative to out_dir)
+        summary_path: Optional path to weekly report (relative to out_dir)
     
     Returns:
         Path to the generated index.html file
@@ -117,10 +117,10 @@ def generate_index_page(
     out_dir_p = Path(out_dir).resolve()
     out_dir_p.mkdir(parents=True, exist_ok=True)
     
-    # Scan for HTML report files (excluding index.html and portfolio_summary.html)
+    # Scan for HTML report files (excluding index.html)
     report_files: List[Tuple[str, str, datetime]] = []
     for html_file in out_dir_p.glob("*.html"):
-        if html_file.name in ("index.html", "portfolio_summary.html"):
+        if html_file.name == "index.html":
             continue
         
         # Parse date and model from filename: YYYY-MM-DD_model.html

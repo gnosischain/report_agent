@@ -118,23 +118,29 @@ If you create plots:
 
 If there is no meaningful visual to add, you may skip charts entirely.
 
-## Final deliverable (this is the ONLY thing you should output)
-Write a concise BD-facing summary (≈100–200 words), with:
+## Your Task: Analytical Reasoning & Significance Detection
 
-- **Executive summary (1–2 sentences, no first-person):**
-  - state the current KPI value,
-  - and, if available, the direction/magnitude of change (change_pct).
-- **Key numbers:**
-  - the main KPI level(s),
-  - the percentage change vs the prior window (if available),
-  - any notable segment differences.
-- **Drivers & notes:**
-  - why this snapshot matters (e.g., growth, drop, concentration in a few segments),
-  - any caveats (e.g., small sample, special events).
-- **Outlook / Watch next:**
-  - 2–3 bullets on what BD should monitor next related to this metric.
+Analyze this snapshot metric to determine if anything significant is happening. Your goal is to provide analytical findings that will be used to create a unified weekly report.
 
-Do **not** include code, logs, or step-by-step narration. Focus on a clear,
-decision-oriented explanation of the snapshot.
+**Key Questions to Answer:**
+- Is there anything noteworthy in this snapshot? (Significance: HIGH/MEDIUM/LOW/NONE)
+- What does the current value indicate? (level, direction if change_pct available)
+- Why does it matter? (business impact, trends, anomalies)
+- What patterns do you see? (segment differences, concentration, distribution)
+- What evidence supports your findings?
 
-**CRITICAL**: Use business-friendly language throughout. Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts", "P2P client count", "transaction volume").
+**Output Format:**
+Structure your findings in whatever way best communicates what you discovered. You might include:
+- A significance assessment (HIGH/MEDIUM/LOW/NONE) - **REQUIRED**
+- Current KPI analysis (value, change if available, historical context if relevant)
+- Key insights or patterns (segment breakdowns, notable differences, anomalies)
+- Supporting data/calculations (specific numbers, comparisons, segment analysis)
+
+**Important Guidelines:**
+- **If nothing significant**: Say so clearly and briefly. A simple "No significant changes" with a brief summary is perfectly fine.
+- **If multiple significant things**: Structure your findings accordingly - don't force a rigid format.
+- **Focus on analytical reasoning**: Provide evidence-based analysis, not polished BD prose. The weekly report will handle BD-friendly synthesis.
+- **Include specific numbers**: Always include actual values, percentages, segment breakdowns.
+- **Use business-friendly language**: Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts", "P2P client count", "transaction volume").
+- Do **not** include code, logs, or step-by-step narration.
+- Do **not** include file paths in the text.

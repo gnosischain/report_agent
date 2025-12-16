@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -29,7 +31,7 @@ class MetricDoc:
 
 def _load_metric_texts(metric_reports: List[Tuple[str, Path]], out_dir: Path) -> Dict[str, str]:
     """
-    Read per-metric report text from reports/text/<metric>.txt,
+    Read per-metric analytical findings from reports/text/<metric>.txt,
     using the same out_dir as used for HTML reports.
     """
     text_dir = out_dir / "text"
@@ -111,7 +113,7 @@ def _parse_highlighted_metrics(output: str) -> List[str]:
 def _strip_highlight_header(output: str) -> str:
     """
     Remove the 'HIGHLIGHTED_METRICS: ...' line and any immediately following blank lines.
-    Returns the cleaned summary body (Markdown).
+    Returns the cleaned weekly report body (Markdown).
     """
     lines = output.splitlines()
     if not lines:
@@ -175,7 +177,7 @@ def _render_summary_page(
     out_path: Path,
 ) -> Path:
     """
-    Render the final summary HTML page, including links to per-metric reports
+    Render the final weekly report HTML page, including links to per-metric reports
     and embedding plots for highlighted metrics.
     """
     tpl = _env.get_template("summary_page.html.j2")
@@ -198,34 +200,45 @@ def _render_summary_page(
         display_name = registry.get_display_name(metric) if registry else metric
         highlighted_with_names.append((metric, display_name))
 
+    # Get current date for the weekly report header
+    report_date = datetime.now().strftime("%B %d, %Y")
+    
     html = tpl.render(
         summary_html=summary_html,
         highlighted_metrics=highlighted_with_names,
         per_metric_reports=per_metric_rel,
         plots_by_metric=plots_by_metric,
+        generated_at=report_date,
     )
     out_path.write_text(html, encoding="utf-8")
     return out_path
 
 
-def generate_portfolio_summary(
+def generate_weekly_report(
     metric_reports: List[Tuple[str, Path]],
     out_dir: str = "reports",
 ) -> Path:
     """
-    Generate a cross-metric portfolio summary.
+    Generate a unified weekly report that synthesizes analytical findings across all metrics.
 
     metric_reports: list of (metric_name, html_path) for per-metric reports
     out_dir: base reports directory (same used for HTML + plots + text)
 
-    Returns the path to the summary HTML.
+    Returns the path to the weekly report HTML (saved as index.html).
     """
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
+    # Copy Gnosis logo to reports directory if it exists
+    logo_src = Path(__file__).parent.parent.parent / "img" / "Gnosis (1).svg"
+    logo_dst = out_root / "img" / "Gnosis (1).svg"
+    if logo_src.exists():
+        logo_dst.parent.mkdir(exist_ok=True)
+        shutil.copy2(logo_src, logo_dst)
+
     metric_texts = _load_metric_texts(metric_reports, out_root)
     if not metric_texts:
-        raise ValueError("No metric report texts found; cannot build portfolio summary.")
+        raise ValueError("No metric analytical findings found; cannot build weekly report.")
 
     metric_docs = _load_metric_docs(list(metric_texts.keys()))
 
@@ -239,7 +252,7 @@ def generate_portfolio_summary(
     resp = client.chat.completions.create(
         model=model_name,
         messages=[
-            {"role": "system", "content": "You are a senior data analyst writing a weekly portfolio summary."},
+            {"role": "system", "content": "You are a senior data analyst writing a unified weekly report."},
             {"role": "user", "content": prompt},
         ],
         temperature=0.3,

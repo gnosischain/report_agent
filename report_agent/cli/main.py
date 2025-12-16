@@ -9,7 +9,7 @@ from typing import Optional, Tuple
 from report_agent.connectors.llm.openai import OpenAICodeInterpreterConnector
 from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.nlg.report_service import generate_html_report
-from report_agent.nlg.summary_service import generate_portfolio_summary
+from report_agent.nlg.summary_service import generate_weekly_report
 from report_agent.utils.config_loader import load_configs, validate_config
 
 
@@ -154,17 +154,17 @@ def main():
                     print(f"  ✗ {metric} failed with unexpected error: {e}", file=sys.stderr)
                     failed_metrics.append((metric, str(e)))
 
-    # Generate portfolio summary (saved as index.html) if requested and we have successful reports
+    # Generate weekly report (saved as index.html) if requested and we have successful reports
     if not args.metric and not args.no_summary and per_metric_html:
-        print("\nGenerating portfolio summary...")
+        print("\nGenerating weekly report...")
         try:
-            summary_path = generate_portfolio_summary(
+            summary_path = generate_weekly_report(
                 metric_reports=per_metric_html,
                 out_dir=str(out_root),
             )
-            print(f"  ✓ Summary HTML saved to: {summary_path} (main entry point)")
+            print(f"  ✓ Weekly report HTML saved to: {summary_path} (main entry point)")
         except Exception as e:
-            print(f"  ✗ Failed to generate summary: {e}", file=sys.stderr)
+            print(f"  ✗ Failed to generate weekly report: {e}", file=sys.stderr)
 
     # Print summary
     print("\n" + "=" * 60)

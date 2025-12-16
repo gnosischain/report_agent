@@ -187,9 +187,10 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             # Silent fallback; schema/meta/CSV are enough
             pass
 
-        # Build model catalog and pre-fetch general insight models (server-side, secure)
+        # Build model catalog (optional context for LLM)
+        # Note: General insight models are not included in per-metric reports - they focus on single metric analysis
         catalog_filename = None
-        pre_fetched_models = {}
+        pre_fetched_models = {}  # Empty - not used for per-metric reports
         catalog = {}
         try:
             # Build model catalog for model_catalog.json (optional context for LLM)
@@ -198,48 +199,9 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                 catalog_path = os.path.join(tmpdir, "model_catalog.json")
                 save_catalog_to_file(catalog, catalog_path)
                 catalog_filename = "model_catalog.json"
-            
-            # Pre-fetch fixed general insight models (always the same 5 models for ecosystem context)
-            general_insight_models = registry.get_general_insight_models()
-            if general_insight_models:
-                log.info(f"Pre-fetching {len(general_insight_models)} general insight models: {general_insight_models}")
-                
-                for insight_model_name in general_insight_models:
-                    try:
-                        # Determine if it's time_series or snapshot from catalog if available
-                        is_time_series = True
-                        if catalog and insight_model_name in catalog:
-                            is_time_series = catalog[insight_model_name].get("kind") == "time_series"
-                        
-                        # Fetch data (30 days for time series, full table for snapshots)
-                        if is_time_series:
-                            sql = f"""
-                                SELECT *
-                                FROM {loader.db.read.database}.{insight_model_name}
-                                WHERE date >= today() - INTERVAL 30 DAY
-                                ORDER BY date ASC
-                            """
-                            df_insight = loader.db.fetch_df(sql)
-                        else:
-                            sql = f"SELECT * FROM {loader.db.read.database}.{insight_model_name}"
-                            df_insight = loader.db.fetch_df(sql)
-                        
-                        insight_csv_path = os.path.join(tmpdir, f"{insight_model_name}.csv")
-                        df_insight.to_csv(insight_csv_path, index=False)
-                        pre_fetched_models[insight_model_name] = os.path.basename(insight_csv_path)
-                        log.info(f"  ✓ Pre-fetched {insight_model_name} ({len(df_insight)} rows)")
-                    except Exception as e:
-                        # Skip if can't fetch (model might not exist or have issues)
-                        log.warning(f"  ✗ Failed to pre-fetch {insight_model_name}: {e}")
-                        pass
-                
-                if pre_fetched_models:
-                    log.info(f"Pre-fetched {len(pre_fetched_models)}/{len(general_insight_models)} general insight models: {list(pre_fetched_models.keys())}")
-                else:
-                    log.info(f"No general insight models successfully pre-fetched")
         except Exception as e:
-            # Log but don't fail - catalog and pre-fetching are optional
-            log.warning(f"Could not build model catalog or pre-fetch general insight models: {e}")
+            # Log but don't fail - catalog is optional
+            log.warning(f"Could not build model catalog: {e}")
 
         # 3) Build the free-form prompt (template depends on kind)
         prompt = build_ci_prompt(
@@ -251,7 +213,7 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             meta_filename=os.path.basename(meta_path),
             docs_filename=docs_filename,
             has_catalog=bool(catalog_filename),
-            pre_fetched_models=pre_fetched_models,
+            pre_fetched_models={},  # Empty - general insight models not used for per-metric reports
             catalog=catalog if catalog_filename else None,
         )
 
@@ -279,19 +241,10 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                 catalog_file = self.client.files.create(file=f_catalog, purpose="assistants")
                 file_ids.append(catalog_file.id)
         
-        # Upload pre-fetched general insight model CSVs (server-side fetched, secure)
         # Track file_id -> model_name and filename -> model_name mappings for usage detection
+        # (Empty for per-metric reports - general insight models not included)
         pre_fetched_file_ids: dict[str, str] = {}  # file_id -> model_name
         pre_fetched_filenames: dict[str, str] = {}  # filename -> model_name
-        if pre_fetched_models:
-            log.info(f"Uploading {len(pre_fetched_models)} general insight models to container")
-            for insight_name, csv_filename in pre_fetched_models.items():
-                insight_csv_path = os.path.join(tmpdir, csv_filename)
-                with open(insight_csv_path, "rb") as f_insight:
-                    insight_file = self.client.files.create(file=f_insight, purpose="assistants")
-                    file_ids.append(insight_file.id)
-                    pre_fetched_file_ids[insight_file.id] = insight_name
-                    pre_fetched_filenames[csv_filename] = insight_name
         
         # 5) Create the response with a code_interpreter container that includes these files
         tools = [

@@ -68,15 +68,17 @@ Full model catalog (`model_catalog.json`) available. Load with `json.load(open('
 - **This plot is REQUIRED and must be created for every metric. You MUST run matplotlib code to generate this plot.**
 - **You must actually execute code like `plt.savefig('plots/{{ model }}_headline_weekly.png')` - do not skip this step.**
 - What: total (all segments) aggregated to weekly using the main `value` measure.
-- Highlight: clearly highlight the **last two weeks** (e.g., shaded span or distinct markers).
+- Highlight: clearly highlight the **last two complete weeks** (e.g., shaded span or distinct markers).
 - Annotate on the chart the WoW delta (absolute and %), e.g., "+72 (+8.2% WoW)".
+- **Important**: Only include complete weeks (Monday-Sunday). Exclude the current partial week.
 - Title: Use a short, readable name based on the metric description (e.g., "Active Accounts by Sector — Weekly total" or "P2P Client Activity — Weekly total"), NOT the technical model name "{{ model }}". Include a subtitle with the key number(s).
 - **Execute code to save:** `plt.savefig('plots/{{ model }}_headline_weekly.png')` - this file MUST exist after your code runs.
 - Then display the plot so it's cited in your output.
 
-**Figure 2 — Last week vs prior week by top 5 segments**
+**Figure 2 — Last complete week vs previous complete week by top 5 segments**
 - What: grouped bars for **top 5 labels by absolute change** week-over-week.
-- Bars: last week vs previous week side-by-side; y-axis starts at 0; add exact values as labels.
+- Bars: last complete week (Monday-Sunday) vs previous complete week side-by-side; y-axis starts at 0; add exact values as labels.
+- **Important**: Only compare complete weeks. Exclude the current partial week from analysis.
 - Sort: by absolute change descending (largest mover first).
 - Title: Use a short, readable name based on the metric description (e.g., "Active Accounts by Sector — Top 5 movers" or "P2P Client Activity — Top 5 movers"), NOT the technical model name "{{ model }}".
 - **Execute code to save:** `plt.savefig('plots/{{ model }}_top5_wow.png')` - this file MUST exist after your code runs.
@@ -93,19 +95,40 @@ Implementation notes:
   - Use bright, high-contrast colors for data series (avoid dark colors)
   - Example: `plt.style.use('dark_background')` or manually set `facecolor='#0b0d12'`, `text.color='#e7edf3'`, `axes.facecolor='#121722'`
 
-## Final deliverable (this is the ONLY thing you should output)
-- **Executive summary (one sentence, no first-person):** Start with one of
-  {Significant increase, Significant decrease, Stable, Mixed} and state the key
-  number(s) with WoW % in plain language.
-- Then a concise BD-facing summary (≈150–300 words), with sections:
-  - **Highlights** — 3–5 bullets on what changed and why (plain language).
-  - **Key numbers** — totals and WoW deltas (absolute + %), top movers.
-  - **Drivers & notes** — brief bullets (segments, timing, anomalies, caveats).
-  - **Outlook / Watch next week** — 2–3 bullets (actionable).
+## Your Task: Analytical Reasoning & Significance Detection
+
+Analyze this metric to determine if anything significant happened **in the last complete week** (Monday-Sunday of last week). Your goal is to provide analytical findings that will be used to create a unified weekly report.
+
+**CRITICAL: Week Definition**
+- **"This week"** means the **last complete week** (Monday-Sunday of the previous week)
+- **Exclude the current partial week** from your analysis - do not include any days from the current week
+- Only compare complete weeks to complete weeks (last complete week vs previous complete week)
+- If today is Wednesday, "this week" means last Monday-Sunday, not Monday-Wednesday
+
+**Key Questions to Answer:**
+- Is there anything noteworthy in the last complete week? (Significance: HIGH/MEDIUM/LOW/NONE)
+- What changed? (magnitude, direction, historical context)
+- Why does it matter? (business impact, trends, anomalies)
+- What patterns or anomalies do you see?
+- What evidence supports your findings?
+
+**Output Format:**
+Structure your findings in whatever way best communicates what you discovered. You might include:
+- A significance assessment (HIGH/MEDIUM/LOW/NONE) - **REQUIRED**
+- Change analysis with historical context (week-over-week comparing complete weeks only, comparison to recent weeks/months)
+- Key insights or patterns (trends, anomalies, notable observations)
+- Supporting data/calculations (specific numbers, comparisons, calculations)
+- Segment breakdowns (if relevant - which segments drove changes)
+
+**Important Guidelines:**
+- **CRITICAL: Only report when significant**: If significance is LOW or NONE, provide ONLY the significance assessment (e.g., "Significance: LOW" or "Significance: NONE") and optionally one brief sentence. Do NOT provide detailed analysis, change analysis, or insights for LOW/NONE significance metrics. The weekly report will skip these entirely.
+- **For HIGH/MEDIUM significance only**: Provide full analytical findings including change analysis, insights, and supporting data.
+- **If multiple significant things happened**: Structure your findings accordingly - don't force a rigid format.
+- **Focus on analytical reasoning**: Provide evidence-based analysis, not polished BD prose. The weekly report will handle BD-friendly synthesis.
+- **Include specific numbers**: Always include actual values, percentages, comparisons to historical periods (but only for HIGH/MEDIUM significance).
+- **Use business-friendly language**: Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts by sector", "P2P client activity", "transaction volume").
 - Do **not** include code, logs, or "first I did X" narration.
-- Do **not** include file paths in the text; refer generically to the "headline trend"
-  and "movers chart".
-- **CRITICAL**: Use business-friendly language throughout. Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts by sector", "P2P client activity", "transaction volume").
+- Do **not** include file paths in the text; refer generically to the "headline trend" and "movers chart".
 
 ## Guardrails
 Allowed: pandas, numpy, matplotlib, json. No network calls. File I/O: read provided files, save plots to `plots/`. Fix errors silently, keep them out of narrative.

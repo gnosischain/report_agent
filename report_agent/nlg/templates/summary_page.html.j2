@@ -2,17 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Report Agent — Portfolio Summary</title>
+  <title>Weekly Report — Report Agent</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root { 
-      --bg:#0b0d12; 
-      --fg:#e7edf3; 
-      --muted:#aab7c7; 
-      --card:#121722; 
-      --accent:#7aa2ff;
-      --accent-hover:#8bb0ff;
-      --border:#1e2636;
+      --bg:#0a0a0f; 
+      --fg:#fff4e4; 
+      --muted:#8d8d8d; 
+      --card:#1a1a24; 
+      --accent:#8ce8ab;
+      --accent-hover:#a0f0c0;
+      --border:#3c4043;
+      --highlight:#ff7130;
     }
     * { box-sizing: border-box; }
     body {
@@ -24,20 +25,68 @@
     header {
       padding: 24px 20px;
       border-bottom: 1px solid var(--border);
-      background: linear-gradient(180deg, #101522, #0b0d12);
+      background: linear-gradient(180deg, #292086, #1a1a2e);
       position: sticky;
       top: 0;
       z-index: 100;
     }
+    .logo {
+      height: 32px;
+      margin-right: 16px;
+      vertical-align: middle;
+    }
+    .header-content {
+      display: flex;
+      align-items: center;
+    }
     .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
-    h1 { margin: 0 0 6px; font-size: 22px; }
+    h1 { margin: 0 0 6px; font-size: 28px; font-weight: 600; }
     .meta { color: var(--muted); font-size: 13px; }
     .card {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 18px;
-      margin: 16px 0;
+      padding: 24px;
+      margin: 20px 0;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
+    .narrative {
+      font-size: 17px;
+      line-height: 1.7;
+    }
+    .narrative h2 {
+      font-size: 22px;
+      margin-top: 1.5em;
+      margin-bottom: 0.8em;
+      color: var(--fg);
+      font-weight: 600;
+    }
+    .narrative h3 {
+      font-size: 18px;
+      margin-top: 1.2em;
+      margin-bottom: 0.6em;
+      color: var(--fg);
+      font-weight: 600;
+    }
+    .narrative ul, .narrative ol {
+      margin: 0.8em 0;
+      padding-left: 1.5em;
+    }
+    .narrative li {
+      margin: 0.5em 0;
+    }
+    .narrative p {
+      margin: 1em 0;
+    }
+    .narrative hr {
+      display: none;
+    }
+    .narrative strong {
+      color: var(--highlight);
+      font-weight: 600;
+    }
+    .narrative ul li::marker {
+      color: var(--accent);
     }
     .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
     img.plot {
@@ -46,18 +95,18 @@
       display: block;
       border-radius: 10px;
       border: 1px solid var(--border);
-      background:#0e131d;
+      background:rgba(60, 64, 67, 0.2);
       cursor: pointer;
       transition: transform 0.2s, box-shadow 0.2s;
     }
     img.plot:hover {
       transform: scale(1.02);
-      box-shadow: 0 4px 12px rgba(122, 162, 255, 0.2);
+      box-shadow: 0 4px 12px rgba(140, 232, 171, 0.3);
     }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
     pre, code {
-      background: #0e131d;
+      background: rgba(60, 64, 67, 0.3);
       border:1px solid var(--border);
       padding: .6em .8em;
       border-radius: 8px;
@@ -66,7 +115,7 @@
     .nav-link:hover {
       background: var(--accent);
       border-color: var(--accent);
-      color: #fff;
+      color: var(--bg);
       text-decoration: none;
     }
     .section-title {
@@ -140,9 +189,14 @@
 <body>
   <header>
     <div class="wrap">
-      <h1>Portfolio Summary</h1>
-      <div class="meta">
-        AI-powered data reports from ClickHouse + dbt · Portfolio view over all tracked metrics
+      <div class="header-content">
+        <img src="img/Gnosis (1).svg" alt="Gnosis" class="logo" />
+        <div>
+          <h1>Weekly Report</h1>
+          <div class="meta">
+            Week of {{ generated_at }} · AI-powered insights from ClickHouse + dbt
+          </div>
+        </div>
       </div>
     </div>
   </header>
@@ -156,7 +210,8 @@
     {% if highlighted_metrics %}
       <!-- Key charts for highlighted metrics -->
       <section class="card">
-        <div class="section-title">Key charts for highlighted metrics (click to enlarge)</div>
+        <div class="section-title">Key Visuals</div>
+        <p style="color: var(--muted); font-size: 14px; margin: 8px 0 16px;">Charts for metrics that changed this week (click to enlarge)</p>
         <div class="grid">
           {% for metric, display_name in highlighted_metrics %}
             <figure>
@@ -181,7 +236,8 @@
 
     <!-- All per-metric reports -->
     <section class="card">
-      <div class="section-title">All per-metric reports</div>
+      <div class="section-title">Detailed Analysis</div>
+      <p style="color: var(--muted); font-size: 14px; margin: 8px 0 16px;">Click any metric below to view detailed analytical findings</p>
       <ul style="list-style: none; padding: 0; margin: 0;">
         {% for metric, display_name, html_name in per_metric_reports %}
           <li style="margin: 8px 0;">
