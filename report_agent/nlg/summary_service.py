@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import dataclass
 from datetime import datetime
@@ -47,6 +48,67 @@ def _load_metric_texts(metric_reports: List[Tuple[str, Path]], out_dir: Path) ->
     return texts
 
 
+def _load_structured_findings(metric_reports: List[Tuple[str, Path]], out_dir: Path) -> Dict[str, dict]:
+    """
+    Load structured findings from reports/structured/<metric>.json.
+    """
+    structured_dir = out_dir / "structured"
+    findings: Dict[str, dict] = {}
+    
+    for metric, _html_path in metric_reports:
+        structured_path = structured_dir / f"{metric}.json"
+        if structured_path.exists():
+            try:
+                findings[metric] = json.loads(structured_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+    
+    return findings
+
+
+def _load_cross_metric_insights(out_dir: Path) -> dict:
+    """Load cross-metric insights if available."""
+    insights_path = out_dir / "cross_metric_insights.json"
+    if insights_path.exists():
+        try:
+            return json.loads(insights_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _filter_low_confidence_findings(
+    metric_findings: Dict[str, dict],
+    validation_results: Dict[str, dict]
+) -> Dict[str, dict]:
+    """
+    Filter out findings with low confidence or validation warnings.
+    """
+    filtered = {}
+    
+    for metric, findings in metric_findings.items():
+        validation = validation_results.get(metric, {})
+        
+        # Skip if validation has errors
+        if validation.get("status") == "errors":
+            continue
+        
+        # Get structured data
+        structured = findings.get("structured", {})
+        significance = structured.get("significance", "").upper()
+        confidence = structured.get("confidence", "").lower()
+        
+        # Skip MEDIUM with low confidence and warnings
+        if significance == "MEDIUM":
+            if confidence == "low" and validation.get("warnings"):
+                # Skip low-confidence MEDIUM with validation warnings
+                continue
+        
+        filtered[metric] = findings
+    
+    return filtered
+
+
 def _load_metric_docs(metric_names: List[str]) -> Dict[str, MetricDoc]:
     """
     Use dbt manifest helpers to get model + column docs for each metric.
@@ -77,7 +139,12 @@ def _load_metric_docs(metric_names: List[str]) -> Dict[str, MetricDoc]:
     return metric_docs
 
 
-def _build_summary_prompt(metric_texts: Dict[str, str], metric_docs: Dict[str, MetricDoc]) -> str:
+def _build_summary_prompt(
+    metric_texts: Dict[str, str],
+    metric_docs: Dict[str, MetricDoc],
+    structured_findings: Dict[str, dict] = None,
+    cross_metric_insights: dict = None,
+) -> str:
     tpl = _env.get_template("summary_prompt.j2")
     docs_for_template = {
         m: {
@@ -86,7 +153,12 @@ def _build_summary_prompt(metric_texts: Dict[str, str], metric_docs: Dict[str, M
         }
         for m, d in metric_docs.items()
     }
-    return tpl.render(metric_reports=metric_texts, metric_docs=docs_for_template)
+    return tpl.render(
+        metric_reports=metric_texts,
+        metric_docs=docs_for_template,
+        structured_findings=structured_findings or {},
+        cross_metric_insights=cross_metric_insights or {},
+    )
 
 
 def _parse_highlighted_metrics(output: str) -> List[str]:
@@ -240,9 +312,30 @@ def generate_weekly_report(
     if not metric_texts:
         raise ValueError("No metric analytical findings found; cannot build weekly report.")
 
+    # Load structured findings
+    structured_findings = _load_structured_findings(metric_reports, out_root)
+    
+    # Load cross-metric insights if available
+    cross_metric_insights = _load_cross_metric_insights(out_root)
+    
+    # Filter low-confidence findings
+    validation_results = {
+        metric: {
+            "status": findings.get("validation_status", "unknown"),
+            "warnings": findings.get("validation_warnings", []),
+        }
+        for metric, findings in structured_findings.items()
+    }
+    filtered_findings = _filter_low_confidence_findings(structured_findings, validation_results)
+    
     metric_docs = _load_metric_docs(list(metric_texts.keys()))
 
-    prompt = _build_summary_prompt(metric_texts, metric_docs)
+    prompt = _build_summary_prompt(
+        metric_texts,
+        metric_docs,
+        structured_findings=filtered_findings,
+        cross_metric_insights=cross_metric_insights,
+    )
 
     cfg = load_configs()
     api_key = cfg["llm"]["api_key"]

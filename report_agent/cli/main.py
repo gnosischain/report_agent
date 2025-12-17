@@ -6,8 +6,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional, Tuple
 
+import json
+
 from report_agent.connectors.llm.openai import OpenAICodeInterpreterConnector
 from report_agent.metrics.metrics_registry import MetricsRegistry
+from report_agent.nlg.cross_metric_service import generate_cross_metric_analysis
 from report_agent.nlg.report_service import generate_html_report
 from report_agent.nlg.summary_service import generate_weekly_report
 from report_agent.utils.config_loader import load_configs, validate_config
@@ -154,6 +157,39 @@ def main():
                     print(f"  ✗ {metric} failed with unexpected error: {e}", file=sys.stderr)
                     failed_metrics.append((metric, str(e)))
 
+    # Collect structured findings and data files for cross-metric analysis
+    structured_findings = {}
+    metric_data_files = {}
+    
+    for metric_name, html_path in per_metric_html:
+        # Load structured findings
+        structured_path = out_root / "structured" / f"{metric_name}.json"
+        if structured_path.exists():
+            try:
+                structured_data = json.loads(structured_path.read_text(encoding="utf-8"))
+                structured_findings[metric_name] = structured_data
+            except Exception:
+                pass
+        
+        # Track data files
+        data_path = out_root / "data" / f"{metric_name}.csv"
+        if data_path.exists():
+            metric_data_files[metric_name] = str(data_path)
+    
+    # Perform cross-metric analysis (only if we have multiple metrics and not single-metric mode)
+    if not args.metric and len(per_metric_html) > 1 and len(structured_findings) >= 2:
+        print("\nPerforming cross-metric analysis...")
+        try:
+            cross_insights = generate_cross_metric_analysis(
+                metric_findings=structured_findings,
+                metric_data_files=metric_data_files,
+                out_dir=str(out_root),
+            )
+            print(f"  ✓ Cross-metric insights saved")
+        except Exception as e:
+            print(f"  ✗ Cross-metric analysis failed: {e}", file=sys.stderr)
+            logging.exception("Cross-metric analysis error")
+    
     # Generate weekly report (saved as index.html) if requested and we have successful reports
     if not args.metric and not args.no_summary and per_metric_html:
         print("\nGenerating weekly report...")

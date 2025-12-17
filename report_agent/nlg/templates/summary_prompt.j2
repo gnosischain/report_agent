@@ -54,7 +54,14 @@ Create a weekly report that tells stakeholders what happened **in the last compl
 - If the report is generated on Wednesday, "this week" means last Monday-Sunday, not Monday-Wednesday
 
 **Key Principles:**
-- **CRITICAL: Only include significant findings**: Only include metrics with HIGH or MEDIUM significance in your report. Completely skip metrics with LOW or NONE significance - do not mention them at all, not even briefly. If you have 10 metrics and only 2 are significant, focus ONLY on those 2. Ignore the rest entirely.
+- **CRITICAL: Be Extremely Selective**: Only include what is TRULY important:
+  - HIGH significance metrics: Always include (these are genuinely noteworthy)
+  - MEDIUM significance metrics: Only include if they add meaningful context or are part of a larger pattern
+  - If you have 5 MEDIUM metrics but they're all minor variations, consider grouping them or skipping some
+  - If nothing is truly noteworthy, write a brief "stable week" report
+- **Quality Over Quantity**: A 2-paragraph report with only the most important finding is better than a long report with marginal findings. Don't feel obligated to include every MEDIUM significance metric. Focus on what stakeholders should actually pay attention to.
+- **Avoid Over-Interpretation**: Don't create dramatic narratives from small changes. Don't infer causation from correlation without strong evidence. Don't suggest actions for changes that are within normal variation. If a change is "interesting but not actionable", consider if it belongs in the report.
+- **Confidence-Based Filtering**: Prioritize findings with high confidence. If structured output shows low confidence, be extra cautious. If validation warnings exist, mention uncertainty or skip if too uncertain.
 - **If nothing significant happened**: If ALL metrics have LOW or NONE significance, write a very brief report (2-3 sentences) stating that nothing significant happened this week and the ecosystem remained stable. Do not create sections for each metric.
 - **Start with a Summary section** (when there are significant findings): Begin the report with a "## Summary" section that provides 2-4 sentences synthesizing the most important changes this week. This helps busy stakeholders quickly understand what matters. Focus on the key numbers and what they mean. Do NOT call it "Executive Summary" - just "Summary".
 - **CRITICAL: Analyze historical context**: For each significant finding, analyze and include historical context. Compare to recent weeks, months, and longer-term patterns. Ask yourself: Is this unusual? Is this a continuation of a trend? Is this a reversal? How does this compare to historical norms? Examples: "This is the largest weekly increase in 3 months", "Returning to levels seen in October", "Continuing a 4-week upward trend", "Breaking a 6-week stable pattern", "This represents a 15% deviation from the 3-month average", "unusual compared to recent patterns". Historical context helps stakeholders understand whether changes are significant or part of normal variation.
@@ -110,3 +117,76 @@ Columns:
 {% endif %}
 
 {% endfor %}
+
+{% if structured_findings %}
+### Structured Findings (Validated Data)
+
+For each metric, you have structured data with validated key numbers. Use these to ensure accuracy:
+
+{% for metric, findings in structured_findings.items() %}
+#### {{ metric }} — Structured Data
+**Significance**: {{ findings.get("structured", {}).get("significance", "UNKNOWN") }}
+**Confidence**: {{ findings.get("structured", {}).get("confidence", "unknown") }}
+
+**Key Numbers** (use these exact values in your narrative):
+{% set key_nums = findings.get("structured", {}).get("key_numbers", {}) %}
+- Last week value: {{ key_nums.get("value_last_week", "N/A") }}
+- Previous week value: {{ key_nums.get("value_prev_week", "N/A") }}
+- Change: {{ key_nums.get("change_absolute", "N/A") }} ({{ key_nums.get("change_percent", "N/A") }}%)
+- 4-week average: {{ key_nums.get("value_4wk_avg", "N/A") }}
+- 3-month average: {{ key_nums.get("value_3mo_avg", "N/A") }}
+
+**Statistical Evidence**:
+{% set stat_ev = findings.get("structured", {}).get("statistical_evidence", {}) %}
+- WoW change: {{ stat_ev.get("wow_change_pct", "N/A") }}%
+- Std devs from 4wk avg: {{ stat_ev.get("std_dev_from_4wk_avg", "N/A") }}
+- Within normal variation: {{ stat_ev.get("within_normal_variation", "N/A") }}
+- Is unusual: {{ stat_ev.get("is_unusual", "N/A") }}
+
+**Validation Status**: {{ findings.get("validation_status", "unknown") }}
+{% if findings.get("validation_warnings") %}
+**Validation Warnings**: {{ findings.get("validation_warnings", []) | join(", ") }}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights and (cross_metric_insights.get("correlations") or cross_metric_insights.get("ecosystem_patterns")) %}
+### Cross-Metric Analysis Insights
+
+The following ecosystem-level patterns were identified:
+
+{% if cross_metric_insights.get("correlations") %}
+**Correlations**:
+{% for corr in cross_metric_insights.get("correlations", []) %}
+- {{ corr.get("metric1", "") }} and {{ corr.get("metric2", "") }}: {{ corr.get("correlation_type", "") }} correlation ({{ corr.get("strength", "") }}) - {{ corr.get("evidence", "") }}
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights.get("ecosystem_patterns") %}
+**Ecosystem Patterns**:
+{% for pattern in cross_metric_insights.get("ecosystem_patterns", []) %}
+- {{ pattern.get("pattern", "") }} (affects: {{ pattern.get("affected_metrics", []) | join(", ") }}, significance: {{ pattern.get("significance", "") }})
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights.get("contradictions") %}
+**Contradictions**:
+{% for contr in cross_metric_insights.get("contradictions", []) %}
+- {{ contr.get("description", "") }} (metrics: {{ contr.get("metrics_involved", []) | join(", ") }}, possible explanation: {{ contr.get("possible_explanation", "") }})
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights.get("discovered_relationships") %}
+**Discovered Relationships** (for future analysis):
+{% for rel in cross_metric_insights.get("discovered_relationships", []) %}
+- {{ rel.get("analyzed_metric", "") }} ↔ {{ rel.get("catalog_metric", "") }}: {{ rel.get("reason", "") }}
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights.get("summary") %}
+**Cross-Metric Summary**: {{ cross_metric_insights.get("summary", "") }}
+{% endif %}
+
+Use these insights to create a more coherent narrative that explains ecosystem-level dynamics, not just individual metric changes.
+{% endif %}

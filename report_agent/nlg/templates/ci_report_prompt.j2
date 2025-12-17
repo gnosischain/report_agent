@@ -95,6 +95,46 @@ Implementation notes:
   - Use bright, high-contrast colors for data series (avoid dark colors)
   - Example: `plt.style.use('dark_background')` or manually set `facecolor='#0b0d12'`, `text.color='#e7edf3'`, `axes.facecolor='#121722'`
 
+## Significance Assessment Guidelines (CRITICAL)
+
+**Be conservative. Only mark as HIGH/MEDIUM if change is truly noteworthy.**
+
+**HIGH Significance** - Only if ALL of these are true:
+- Change is >15% week-over-week AND
+- Change represents >2 standard deviations from 4-week average AND
+- Change is unusual compared to historical patterns (not part of normal variation) AND
+- Change has clear business impact (opportunity, risk, or notable shift)
+
+**MEDIUM Significance** - Only if:
+- Change is >10% week-over-week OR >1.5 standard deviations from 4-week average AND
+- Change is somewhat unusual (not clearly normal variation) AND
+- Change has some business relevance
+
+**LOW Significance** - If:
+- Change is 5-10% week-over-week but within normal variation OR
+- Change is notable in magnitude but clearly part of expected pattern/trend
+
+**NONE Significance** - If:
+- Change is <5% week-over-week OR
+- Change is within normal variation (within 1 standard deviation of 4-week avg) OR
+- No meaningful change detected
+
+**CRITICAL: Avoid False Positives**
+- A 20% increase that's part of a steady 4-week upward trend is NOT HIGH significance - it's continuation of a pattern
+- A 10% change that's within the normal weekly variation range is NOT significant
+- Only mark as HIGH if the change is genuinely unusual and noteworthy
+- When in doubt, choose a lower significance level
+
+**Confidence Assessment**
+- High confidence: Clear statistical evidence, unusual pattern, strong historical context
+- Medium confidence: Some evidence but some ambiguity
+- Low confidence: Weak evidence, could be noise
+
+Calculate and report:
+- Standard deviation of last 4 weeks
+- How many standard deviations this week's change represents
+- Whether this change is within normal variation range
+
 ## Your Task: Analytical Reasoning & Significance Detection
 
 Analyze this metric to determine if anything significant happened **in the last complete week** (Monday-Sunday of last week). Your goal is to provide analytical findings that will be used to create a unified weekly report.
@@ -113,21 +153,61 @@ Analyze this metric to determine if anything significant happened **in the last 
 - What patterns or anomalies do you see?
 - What evidence supports your findings?
 
-**Output Format:**
-Structure your findings in whatever way best communicates what you discovered. You might include:
-- A significance assessment (HIGH/MEDIUM/LOW/NONE) - **REQUIRED**
-- Change analysis with **strong historical context** (week-over-week comparing complete weeks only, comparison to recent weeks/months, longer-term trends, whether this is unusual or part of a pattern)
-- Key insights or patterns (trends, anomalies, notable observations)
-- Supporting data/calculations (specific numbers, comparisons, calculations)
-- Segment breakdowns (if relevant - which segments drove changes)
+**Output Format (CRITICAL - You MUST provide structured JSON):**
+
+You MUST provide your response in the following format. Start with a JSON block, then provide your narrative:
+
+```json
+{
+  "significance": "HIGH" | "MEDIUM" | "LOW" | "NONE",
+  "confidence": "high" | "medium" | "low",
+  "statistical_evidence": {
+    "wow_change_pct": <number>,
+    "std_dev_from_4wk_avg": <number>,
+    "within_normal_variation": true | false,
+    "is_unusual": true | false,
+    "is_trend_continuation": true | false
+  },
+  "key_numbers": {
+    "value_last_week": <number>,
+    "value_prev_week": <number>,
+    "change_absolute": <number>,
+    "change_percent": <number>,
+    "value_4wk_avg": <number>,
+    "value_3mo_avg": <number> | null,
+    "deviation_from_avg": <number>
+  },
+  "historical_context": {
+    "comparison_to_4wk_avg": "<description>",
+    "comparison_to_3mo_avg": "<description>",
+    "trend_direction": "increasing" | "decreasing" | "stable" | "volatile",
+    "unusual_patterns": ["<pattern1>", "<pattern2>"]
+  },
+  "related_metrics_hypothesis": [
+    {
+      "metric_name": "<model_name_from_catalog>",
+      "reason": "<why this might be related>",
+      "expected_correlation": "positive" | "negative" | "unknown"
+    }
+  ]
+}
+```
+
+Then provide your full narrative text after the JSON block.
+
+**CRITICAL:**
+- The `key_numbers` must be EXACT values you calculated from the data
+- The `narrative` should reference these exact numbers
+- If you identify potentially related metrics from the catalog, list them in `related_metrics_hypothesis`
+- The narrative comes AFTER the JSON block
 
 **Important Guidelines:**
-- **CRITICAL: Only report when significant**: If significance is LOW or NONE, provide ONLY the significance assessment (e.g., "Significance: LOW" or "Significance: NONE") and optionally one brief sentence. Do NOT provide detailed analysis, change analysis, or insights for LOW/NONE significance metrics. The weekly report will skip these entirely.
-- **For HIGH/MEDIUM significance only**: Provide full analytical findings including change analysis, **detailed historical context**, insights, and supporting data.
+- **CRITICAL: Only report when significant**: If significance is LOW or NONE, provide ONLY the significance assessment in JSON and optionally one brief sentence in narrative. Do NOT provide detailed analysis, change analysis, or insights for LOW/NONE significance metrics. The weekly report will skip these entirely.
+- **For HIGH/MEDIUM significance only**: Provide full analytical findings including change analysis, **detailed historical context**, insights, and supporting data in both JSON and narrative.
 - **Historical context is essential**: Always analyze how this week compares to historical patterns. Include comparisons like: "largest change in X weeks/months", "continuing a Y-week trend", "returning to levels seen in [period]", "X% deviation from 3-month average", "unusual compared to recent patterns". This context is critical for understanding significance.
 - **If multiple significant things happened**: Structure your findings accordingly - don't force a rigid format.
 - **Focus on analytical reasoning**: Provide evidence-based analysis, not polished BD prose. The weekly report will handle BD-friendly synthesis.
-- **Include specific numbers**: Always include actual values, percentages, comparisons to historical periods (but only for HIGH/MEDIUM significance).
+- **Include specific numbers**: Always include actual values, percentages, comparisons to historical periods (but only for HIGH/MEDIUM significance). These must match the numbers in your JSON.
 - **Use business-friendly language**: Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts by sector", "P2P client activity", "transaction volume").
 - Do **not** include code, logs, or "first I did X" narration.
 - Do **not** include file paths in the text; refer generically to the "headline trend" and "movers chart".

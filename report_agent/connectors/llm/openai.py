@@ -42,12 +42,21 @@ class OpenAICodeInterpreterConnector(LLMConnector):
 
     def __init__(self, api_key: str, model_name: str = "gpt-4.1"):
         super().__init__(api_key, model_name)
-        self.client = OpenAI(api_key=api_key)
+        # Disable automatic retries to save credits
+        self.client = OpenAI(
+            api_key=api_key,
+            max_retries=0,  # Disable retries
+            http_client=httpx.Client(
+                timeout=httpx.Timeout(300.0, connect=10.0),  # 5 min total, 10s connect
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            ),
+        )
         self._api_key = api_key  # keep for HTTP fallback downloads
         self.tools = [{"type": "code_interpreter", "container": {"type": "auto"}}]
         self._last_artifacts: Optional[dict] = None
         self._last_dataframe: Optional[pd.DataFrame] = None
         self._last_model_name: Optional[str] = None
+        self._last_validation: Optional[dict] = None
 
     # ---- Tools API (no-op here) ----
 
@@ -96,7 +105,7 @@ class OpenAICodeInterpreterConnector(LLMConnector):
 
     # ---- Public API expected by callers ----
 
-    def run_report(self, model_name: str, lookback_days: int | None = None) -> str:
+    def run_report(self, model_name: str, lookback_days: int | None = None) -> dict:
         """
         High-level entrypoint used by the CLI / report_service.
 
@@ -104,7 +113,16 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         - Fetches the appropriate data slice.
         - Writes CSV/schema/meta/docs to a temp dir.
         - Invokes the Responses API with code_interpreter.
-        - Returns the final narrative text.
+        - Parses structured output and validates significance.
+        - Returns dict with narrative, structured data, and validation results.
+        
+        Returns:
+            {
+                "narrative": str,
+                "structured": dict,
+                "validation_status": str ("valid" | "warnings" | "errors"),
+                "validation_warnings": list,
+            }
         """
         # 1) Load configs/registry and fetch raw data
         cfg = load_configs()
@@ -122,11 +140,21 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             df = loader.fetch_snapshot(model_name)
 
         if df is None or df.empty:
-            return f"No data returned for model '{model_name}'"
+            return {
+                "narrative": f"No data returned for model '{model_name}'",
+                "structured": {},
+                "validation_status": "errors",
+                "validation_warnings": [f"No data returned for model '{model_name}'"],
+            }
 
         # For time series, we require a date column; for snapshots we allow tables without date
         if kind == "time_series" and "date" not in df.columns:
-            return f"Model '{model_name}' has no 'date' column; cannot proceed."
+            return {
+                "narrative": f"Model '{model_name}' has no 'date' column; cannot proceed.",
+                "structured": {},
+                "validation_status": "errors",
+                "validation_warnings": [f"Model '{model_name}' has no 'date' column"],
+            }
 
         # Store the dataframe for potential reuse (e.g., saving CSV without re-fetching)
         self._last_dataframe = df.copy()  # Store a copy to avoid mutations
@@ -259,16 +287,27 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             "Follow the task specification given in the input."
         )
 
-        resp = self.client.responses.create(
-            model=self.model_name,
-            tools=tools,
-            tool_choice="required",
-            max_tool_calls=8,
-            parallel_tool_calls=False,
-            instructions=instructions,
-            input=prompt,
-            temperature=0.2,
-        )
+        try:
+            resp = self.client.responses.create(
+                model=self.model_name,
+                tools=tools,
+                tool_choice="required",
+                max_tool_calls=8,
+                parallel_tool_calls=False,
+                instructions=instructions,
+                input=prompt,
+                temperature=0.2,
+            )
+        except Exception as e:
+            # If API call fails, return error dict instead of raising
+            error_msg = str(e)
+            log.error(f"API call failed for {model_name}: {error_msg}")
+            return {
+                "narrative": f"Error: {error_msg}",
+                "structured": {},
+                "validation_status": "errors",
+                "validation_warnings": [f"API call failed: {error_msg}"],
+            }
 
         # Collect container artifacts (citations)
         try:
@@ -276,33 +315,19 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         except Exception:
             self._last_artifacts = None
 
-        # 6) Return final text (try several shapes)
-        text = getattr(resp, "output_text", None)
-        if isinstance(text, str) and text.strip():
-            return text
-
-        try:
-            parts: List[str] = []
-            output = getattr(resp, "output", None)
-            if isinstance(output, list):
-                for item in output:
-                    if isinstance(item, dict) and item.get("type") == "message":
-                        for c in item.get("content", []) or []:
-                            if c.get("type") in ("output_text", "text"):
-                                parts.append(c.get("text", ""))
-                    elif hasattr(item, "content"):
-                        for c in (item.content or []):
-                            if getattr(c, "type", None) in ("output_text", "text"):
-                                parts.append(getattr(c, "text", ""))
-            if parts:
-                text = "\n".join(p for p in parts if p)
-                return text
-        except Exception:
-            pass
-
-        # Last resort
-        text = str(resp)
-        return text
+        # 6) Parse structured output and validate
+        narrative, structured_data = self._parse_structured_output(resp)
+        
+        # 7) Validate significance assessment
+        validation_result = self._validate_significance(narrative, structured_data, df)
+        self._last_validation = validation_result
+        
+        return {
+            "narrative": narrative,
+            "structured": structured_data,
+            "validation_status": validation_result["status"],
+            "validation_warnings": validation_result.get("warnings", []),
+        }
 
     # ---------- Artifacts (citations) ----------
 
@@ -381,6 +406,156 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             if df is not None:
                 return df.copy()  # Return a copy to avoid mutations
         return None
+
+    def get_last_validation(self) -> Optional[dict]:
+        """Return validation results from the most recent run (or None)."""
+        return getattr(self, "_last_validation", None)
+
+    # ---------- Structured Output Parsing & Validation ----------
+
+    def _parse_structured_output(self, resp) -> tuple[str, dict]:
+        """
+        Extract JSON and narrative from LLM response.
+        
+        Returns:
+            tuple: (narrative_text, structured_dict)
+        """
+        # Try to get text from response
+        text = getattr(resp, "output_text", None)
+        if not text or not isinstance(text, str):
+            # Try alternative extraction methods
+            try:
+                parts: List[str] = []
+                output = getattr(resp, "output", None)
+                if isinstance(output, list):
+                    for item in output:
+                        if isinstance(item, dict) and item.get("type") == "message":
+                            for c in item.get("content", []) or []:
+                                if c.get("type") in ("output_text", "text"):
+                                    parts.append(c.get("text", ""))
+                        elif hasattr(item, "content"):
+                            for c in (item.content or []):
+                                if getattr(c, "type", None) in ("output_text", "text"):
+                                    parts.append(getattr(c, "text", ""))
+                if parts:
+                    text = "\n".join(p for p in parts if p)
+            except Exception:
+                pass
+        
+        if not text:
+            text = str(resp)
+        
+        # Try to extract JSON block
+        import re
+        json_match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
+        if json_match:
+            try:
+                structured = json.loads(json_match.group(1))
+                narrative = text.replace(json_match.group(0), "").strip()
+                return narrative, structured
+            except json.JSONDecodeError:
+                pass
+        
+        # Fallback: try to find JSON anywhere (without code block markers)
+        json_match = re.search(r'\{[^{}]*"significance"[^{}]*\}', text, re.DOTALL)
+        if json_match:
+            try:
+                structured = json.loads(json_match.group(0))
+                narrative = text.replace(json_match.group(0), "").strip()
+                return narrative, structured
+            except json.JSONDecodeError:
+                pass
+        
+        # No structured output found - return text as narrative
+        return text, {}
+
+    def _validate_significance(self, narrative: str, structured: dict, df: pd.DataFrame) -> dict:
+        """
+        Validate that significance assessment is justified by the data.
+        Prevents over-interpretation.
+        
+        Returns:
+            dict with status ("valid" | "warnings" | "errors") and warnings list
+        """
+        warnings = []
+        errors = []
+        
+        if not structured:
+            return {"status": "errors", "warnings": ["No structured output found"], "errors": ["No structured output found"]}
+        
+        significance = structured.get("significance", "").upper()
+        stat_evidence = structured.get("statistical_evidence", {})
+        
+        # Calculate actual statistics from data
+        if "date" in df.columns and "value" in df.columns:
+            try:
+                # Aggregate by week
+                df_copy = df.copy()
+                df_copy["date"] = pd.to_datetime(df_copy["date"], errors="coerce")
+                df_copy = df_copy.dropna(subset=["date"])
+                
+                if len(df_copy) > 0:
+                    df_copy["week"] = df_copy["date"].dt.to_period("W")
+                    
+                    # Handle multiple rows per date (aggregate by date first, then by week)
+                    if "label" in df_copy.columns:
+                        # Group by date and label, sum values, then group by week
+                        daily = df_copy.groupby(["date", "label"])["value"].sum().reset_index()
+                        daily["week"] = daily["date"].dt.to_period("W")
+                        weekly = daily.groupby("week")["value"].sum().reset_index()
+                    else:
+                        daily = df_copy.groupby("date")["value"].sum().reset_index()
+                        daily["week"] = daily["date"].dt.to_period("W")
+                        weekly = daily.groupby("week")["value"].sum().reset_index()
+                    
+                    if len(weekly) >= 4:
+                        last_week = weekly.iloc[-1]["value"]
+                        prev_week = weekly.iloc[-2]["value"] if len(weekly) >= 2 else None
+                        four_week_values = weekly.iloc[-4:]["value"]
+                        four_week_avg = four_week_values.mean()
+                        four_week_std = four_week_values.std()
+                        
+                        if prev_week and four_week_std > 0:
+                            wow_change_pct = ((last_week - prev_week) / prev_week) * 100 if prev_week != 0 else 0
+                            std_devs_away = (last_week - four_week_avg) / four_week_std
+                            
+                            # Validate significance assessment
+                            if significance == "HIGH":
+                                # HIGH should have strong evidence
+                                if abs(wow_change_pct) < 15:
+                                    warnings.append(f"HIGH significance but only {wow_change_pct:.1f}% change (expected >15%)")
+                                if abs(std_devs_away) < 2:
+                                    warnings.append(f"HIGH significance but only {std_devs_away:.1f} std devs from avg (expected >2)")
+                            
+                            if significance == "MEDIUM":
+                                # MEDIUM should have some evidence
+                                if abs(wow_change_pct) < 5:
+                                    warnings.append(f"MEDIUM significance but only {wow_change_pct:.1f}% change (expected >5%)")
+                            
+                            # Check if within normal variation
+                            if abs(std_devs_away) < 1 and significance in ["HIGH", "MEDIUM"]:
+                                warnings.append(f"Significance {significance} but change is within normal variation (±1 std dev)")
+                            
+                            # Check if it's trend continuation (not unusual)
+                            if len(weekly) >= 3:
+                                trend_direction = "increasing" if weekly.iloc[-1]["value"] > weekly.iloc[-2]["value"] else "decreasing"
+                                prev_trend = "increasing" if weekly.iloc[-2]["value"] > weekly.iloc[-3]["value"] else "decreasing"
+                                if trend_direction == prev_trend and significance == "HIGH":
+                                    warnings.append(f"HIGH significance but change continues existing {trend_direction} trend (may not be unusual)")
+            except Exception as e:
+                # Don't fail validation on calculation errors, just log
+                log.debug(f"Error calculating validation statistics: {e}")
+        
+        # Check significance is present
+        if not significance or significance not in ["HIGH", "MEDIUM", "LOW", "NONE"]:
+            errors.append("Missing or invalid significance assessment (must be HIGH/MEDIUM/LOW/NONE)")
+        
+        status = "errors" if errors else ("warnings" if warnings else "valid")
+        return {
+            "status": status,
+            "warnings": warnings,
+            "errors": errors,
+        }
 
     # ---------- Downloads ----------
 
