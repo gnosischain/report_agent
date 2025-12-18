@@ -289,15 +289,15 @@ class OpenAICodeInterpreterConnector(LLMConnector):
 
         try:
             resp = self.client.responses.create(
-                model=self.model_name,
-                tools=tools,
-                tool_choice="required",
-                max_tool_calls=8,
-                parallel_tool_calls=False,
-                instructions=instructions,
-                input=prompt,
-                temperature=0.2,
-            )
+            model=self.model_name,
+            tools=tools,
+            tool_choice="required",
+            max_tool_calls=8,
+            parallel_tool_calls=False,
+            instructions=instructions,
+            input=prompt,
+            temperature=0.2,
+        )
         except Exception as e:
             # If API call fails, return error dict instead of raising
             error_msg = str(e)
