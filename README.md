@@ -7,7 +7,8 @@ Concise, modular system to generate **weekly data reports** directly from ClickH
 The model receives **raw tables** (CSV) plus neutral context (schema, meta, optional dbt docs), then decides how to analyze, visualize, and summarize — **no precomputed metrics**. Each run produces:
 
 * Per-metric HTML reports with BD-friendly narrative and plots.
-* An optional portfolio summary HTML that highlights the most important metrics.
+* A unified weekly report HTML that synthesizes findings across all metrics.
+* Cross-metric analysis discovering relationships and ecosystem patterns.
 
 ---
 
@@ -15,9 +16,12 @@ The model receives **raw tables** (CSV) plus neutral context (schema, meta, opti
 
 * **Free-form analysis**: Model runs Python in a sandbox (Responses API + `code_interpreter`), no fixed toolchain.
 * **Parallel processing**: Process multiple metrics concurrently with `--max-workers` flag for faster execution.
-* **Optimized prompts**: Reduced token usage (~30-40%) through prompt optimization while maintaining all functionality.
+* **Structured output + validation**: LLM returns structured JSON with key numbers and statistical evidence, automatically validated to ensure accuracy and prevent over-interpretation.
+* **Cross-metric analysis**: Discovers correlations, patterns, and relationships across metrics to provide ecosystem-level insights.
+* **Enhanced significance detection**: Strict criteria prevent false positives - only truly noteworthy changes are reported.
+* **Cost-efficient**: No automatic retries, optimized prompts, and parallel processing minimize API costs.
 * **Raw inputs**: Time series (date, value, optional label) and snapshots (value, optional change_pct, optional label).
-* **Neutral context**: Attaches `*.schema.json` (dtypes/examples/roles), `*.meta.json` (coverage/kind), and optional `*.docs.md`.
+* **Neutral context**: Attaches `*.schema.json` (dtypes/examples/roles), `*.meta.json` (coverage/kind), optional `*.docs.md`, and model catalog for discovery.
 * **Evidence-first visuals**: Weekly total + WoW movers plots required by the prompt for time series.
 * **Static HTML**: Dark-themed per-metric pages + a summary page, all assets referenced via relative paths.
 
@@ -49,13 +53,14 @@ report_agent/
     prompt_builder.py             # builds CI prompts (time_series vs snapshot)
     html_report.py                # render per-metric HTML
     report_service.py             # run CI -> download plots -> save CSV/text -> HTML
-    summary_service.py            # cross-metric portfolio summary (2–4 highlighted metrics)
+    summary_service.py            # unified weekly report synthesizing all metrics
+    cross_metric_service.py       # cross-metric correlation analysis
     templates/
       ci_report_prompt.j2         # time-series CI prompt (weekly report + required plots)
       ci_snapshot_prompt.j2       # snapshot CI prompt (single KPI)
       report_page.html.j2         # per-metric HTML template (dark theme)
-      summary_prompt.j2           # portfolio summary LLM prompt
-      summary_page.html.j2        # portfolio summary HTML template
+      summary_prompt.j2           # weekly report LLM prompt
+      summary_page.html.j2        # weekly report HTML template
 
   utils/
     config_loader.py              # loads .env and returns config dict
@@ -65,9 +70,9 @@ report_agent/
 
 ```
 reports/
-  2025-11-26_api_p2p_discv4_clients_daily.html
-  2025-11-26_api_execution_transactions_active_accounts_7d.html
-  portfolio_summary.html
+  2025-12-17_api_p2p_discv4_clients_daily.html
+  2025-12-17_api_execution_transactions_active_accounts_by_sector_daily.html
+  index.html                       # unified weekly report (main entry point)
 
   plots/
     api_p2p_discv4_clients_daily_headline_weekly.png
@@ -76,11 +81,16 @@ reports/
 
   data/
     api_p2p_discv4_clients_daily.csv
-    api_execution_transactions_active_accounts_7d.csv
+    api_execution_transactions_active_accounts_by_sector_daily.csv
 
   text/
     api_p2p_discv4_clients_daily.txt
-    api_execution_transactions_active_accounts_7d.txt
+    api_execution_transactions_active_accounts_by_sector_daily.txt
+
+  structured/
+    api_p2p_discv4_clients_daily.json  # structured output with validation
+
+  cross_metric_insights.json       # cross-metric analysis results (if multiple metrics)
 ```
 
 ---
@@ -164,18 +174,30 @@ metrics:
     * `{model}.schema.json` — dtypes + sample values + simple roles (time/measure/dimension/delta)
     * `{model}.meta.json` — counts, (optional) date range, kind
     * `{model}.docs.md` — dbt model + column docs (if available)
-4.  **Run Code Interpreter**:
+    * `model_catalog.json` — full catalog of all available models (for discovery)
+4.  **Run Code Interpreter (Per-Metric Analysis)**:
     * Files uploaded to OpenAI as container files.
-    * `build_ci_prompt()` selects the correct prompt template (time series vs snapshot).
-    * Responses API runs with `code_interpreter` and returns a BD-facing narrative.
+    * `build_ci_prompt()` selects the correct prompt template (time series vs snapshot) with strict significance criteria.
+    * Responses API runs with `code_interpreter` and returns:
+      * Structured JSON with significance, confidence, key numbers, and statistical evidence
+      * BD-facing narrative text
+    * Significance is validated against actual data to prevent over-interpretation.
 5.  **Persist outputs**:
     * Narrative → `reports/text/<model>.txt`
+    * Structured output → `reports/structured/<model>.json`
     * Plots → downloaded via `download_artifacts()` into `reports/plots/`
     * Data → `reports/data/<model>.csv`
     * Per-metric HTML → `html_report.render_html_report()` writes `YYYY-MM-DD_<model>.html`
-6.  **Portfolio summary (optional)**:
-    * Uses `summary_service.generate_portfolio_summary()` on the collected metric texts + dbt docs.
-    * LLM picks 2–4 key metrics and writes a portfolio-level summary.
+6.  **Cross-metric analysis** (if multiple metrics):
+    * `cross_metric_service.generate_cross_metric_analysis()` analyzes relationships between all processed metrics
+    * Discovers correlations, ecosystem patterns, and contradictions
+    * Uses catalog to suggest related metrics for future analysis
+    * Results saved to `reports/cross_metric_insights.json`
+7.  **Weekly report synthesis**:
+    * Uses `summary_service.generate_weekly_report()` on the collected metric texts + structured data + cross-metric insights
+    * Filters low-confidence findings automatically
+    * LLM synthesizes findings across all metrics with ecosystem context
+    * Creates unified weekly report saved as `reports/index.html`
 
 ---
 
@@ -210,11 +232,45 @@ metrics:
 
 ---
 
+## Architecture Highlights
+
+### Structured Output & Validation
+
+Each metric analysis returns structured JSON with:
+- **Significance assessment**: HIGH/MEDIUM/LOW/NONE based on strict criteria
+- **Confidence level**: high/medium/low
+- **Key numbers**: validated values (last week, previous week, change %, averages)
+- **Statistical evidence**: standard deviations, normal variation checks, trend analysis
+
+The system validates that significance claims are justified by the actual data, preventing false positives and over-interpretation.
+
+### Cross-Metric Analysis
+
+After all metrics are analyzed, the system performs cross-metric correlation analysis:
+- Discovers which metrics moved together
+- Identifies ecosystem-wide patterns
+- Detects contradictory signals
+- Suggests related metrics for future analysis (using catalog for discovery)
+
+Only strong correlations (>0.7) are reported to avoid noise.
+
+### Significance Detection
+
+Strict criteria ensure only truly noteworthy changes are reported:
+- **HIGH**: >15% change AND >2 std devs AND unusual pattern AND clear business impact
+- **MEDIUM**: >10% change OR >1.5 std devs AND somewhat unusual
+- **LOW/NONE**: Within normal variation or expected patterns
+
+This prevents reporting normal fluctuations as significant events.
+
+---
+
 ## Performance & Optimization
 
 * **Parallel Processing**: By default, metrics are processed with 3 parallel workers. Use `--max-workers N` to control concurrency. With 3 workers, 3 metrics complete in roughly the time of the slowest single metric.
-* **Prompt Optimization**: Prompts have been optimized to reduce token usage by ~30-40% while maintaining all functionality, resulting in lower API costs.
-* **Cost Efficiency**: Optimized prompts combined with parallel processing provide faster execution and reduced costs per report.
+* **No Automatic Retries**: Retries are disabled (`max_retries=0`) to prevent unnecessary credit usage. Failures are immediately reported.
+* **Prompt Optimization**: Prompts have been optimized to reduce token usage while maintaining all functionality.
+* **Cost Efficiency**: Optimized prompts, parallel processing, and no retries minimize API costs per report.
 
 ---
 
@@ -223,8 +279,9 @@ metrics:
 * **ClickHouse UNKNOWN_IDENTIFIER date**: Mark snapshot tables as `kind: snapshot` in `metrics.yml` so they don't get a `WHERE date` filter.
 * **Plots not generated**: Plots are generated when possible but not guaranteed due to Code Interpreter limitations. Reports are complete and useful even without plots. You'll see a warning message if plots are missing for a metric.
 * **Plots not visible in HTML**: Check that PNGs exist in `reports/plots/` and that you open the HTML from the same directory tree (paths are relative).
-* **No portfolio summary**: Ensure you didn't pass `--no-summary` and that at least one metric completed successfully.
+* **No weekly report**: Ensure you didn't pass `--no-summary` and that at least one metric completed successfully.
 * **Parallel processing issues**: If you encounter issues with parallel processing, try running with `--max-workers 1` for sequential execution.
+* **API connection errors**: These are external API issues, not code bugs. The system will properly report failures and won't retry automatically to save credits.
 
 ---
 
@@ -232,6 +289,5 @@ metrics:
 
 * More metric kinds and templates (e.g. funnels, distributions).
 * Slack / email delivery on schedule.
-* Lightweight consistency checks between narrative and numbers.
 * Support for additional LLM providers (e.g. Gemini) behind the same connector interface.
 * Better Frontend

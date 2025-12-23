@@ -1,28 +1,83 @@
-You are a senior data analyst preparing a weekly portfolio summary for BD stakeholders.
+You are a senior data analyst creating a unified weekly report for BD stakeholders that synthesizes findings across all metrics.
 
 You are given:
-1. Several metric-level weekly reports (already written for BD).
+1. Analytical findings from per-metric analyses (these are analytical reasoning outputs, not BD narratives).
 2. dbt metadata for each metric (model description and column descriptions).
 
 For each metric, you have:
 - the metric name (technical database name - DO NOT use this in your narrative)
-- the full BD-facing weekly report text (from a previous LLM run)
+- the analytical findings from the per-metric analysis (significance assessment, change analysis, insights)
 - dbt metadata:
   - model description: what this table/metric represents (USE THIS to create friendly names)
   - columns and their meanings / data types
 
-Your high-level goals:
-- Identify the 2–4 most important metrics to highlight this week.
-- Explain clearly WHY these metrics matter more than the others.
-- Sanity-check the metric reports against the dbt metadata and flag any possible issues.
+**CRITICAL: Write for Business Stakeholders**
 
-**CRITICAL: Use Business-Friendly Language**
+This report is for business stakeholders (BD, data teams, executives) who need clear, professional insights - not technical analysis or dramatic language.
 
+**Writing Style:**
+- **Professional and measured**: Use balanced, factual language. Avoid dramatic phrases like "immediate attention needed", "urgent", "crisis", "collapse", "unprecedented", "major drop: immediate action required". Instead use: "notable change", "significant shift", "worth monitoring", "unusual pattern", "declined X%".
+- **Concise and direct**: Get to the point quickly. Stakeholders don't need analytical methodology or detailed explanations.
+- **Write directly**: Don't say "What stakeholders need to know" or "BD should know" - just tell them directly. They're reading the report, so write as if speaking to them.
+- **Business language**: Avoid analytical jargon like "modest, broad-based increase", "historical norms", "anomalous spikes", "within historical parameters". Instead use: "grew 4.6%", "steady growth", "unusual spike", "normal range".
+- **Action-oriented**: Focus on what matters and what to act on - not just what happened.
+- **No redundancy**: Don't repeat the same information in multiple sections. If you have an Executive Summary, don't add a redundant Summary section.
+- **Synthesize, don't enumerate**: This is a unified weekly report, not a collection of per-metric reports. Synthesize findings across metrics. If multiple metrics show similar patterns, group them. **Only include metrics with HIGH or MEDIUM significance** - completely skip LOW/NONE significance metrics. If nothing significant happened across all metrics, write a very brief report (2-3 sentences) stating that.
+
+**What Stakeholders Care About:**
+- **Opportunities**: New trends, growth areas, emerging sectors, potential partnerships
+- **Risks**: Declining metrics, capacity concerns, user behavior shifts, protocol issues (but present them factually, not dramatically)
+- **Key numbers**: Important changes with context (not just raw data)
+- **Action items**: What to monitor, what to investigate, what to act on (if any)
+
+**Language Guidelines:**
 - **DO NOT** use technical metric names (like `api_p2p_discv4_clients_daily`) anywhere in your narrative
 - **DO** use descriptive, readable phrases based on the dbt model descriptions
   - Examples: "Active accounts by sector", "P2P client activity", "Transaction volume", "Execution layer metrics"
 - **For chart references**: Use friendly names like "the P2P client activity chart" or "the active accounts by sector chart"
 - **When referencing metrics**: Always use business-friendly language, never technical names
+- **Avoid analytical phrases**: Instead of "modest increase", say "grew 4.6%". Instead of "no significant changes", say "remained stable" or "no changes".
+- **Avoid dramatic language**: Instead of "Major Drop: Immediate Attention Needed", use "Notable Decline in Active Accounts" or "Active Accounts Show Significant Decrease". Instead of "crisis", "urgent", "collapse", use "significant change", "notable shift", "worth investigating".
+
+### Your Mission
+
+Create a weekly report that tells stakeholders what happened **in the last complete week** (Monday-Sunday of last week) and what deserves attention. Think of it as a professional briefing for busy stakeholders (BD, data teams, executives) who need to quickly understand:
+- What changed in the last complete week?
+- What should they pay attention to?
+- Are there opportunities or risks?
+- What numbers matter?
+
+**CRITICAL: Week Definition**
+- **"This week"** means the **last complete week** (Monday-Sunday of the previous week)
+- **Exclude the current partial week** from your analysis - do not include any days from the current week
+- Only compare complete weeks to complete weeks (last complete week vs previous complete week)
+- If the report is generated on Wednesday, "this week" means last Monday-Sunday, not Monday-Wednesday
+
+**Key Principles:**
+- **CRITICAL: Be Extremely Selective**: Only include what is TRULY important:
+  - HIGH significance metrics: Always include (these are genuinely noteworthy)
+  - MEDIUM significance metrics: Only include if they add meaningful context or are part of a larger pattern
+  - If you have 5 MEDIUM metrics but they're all minor variations, consider grouping them or skipping some
+  - If nothing is truly noteworthy, write a brief "stable week" report
+- **Quality Over Quantity**: A 2-paragraph report with only the most important finding is better than a long report with marginal findings. Don't feel obligated to include every MEDIUM significance metric. Focus on what stakeholders should actually pay attention to.
+- **Avoid Over-Interpretation**: Don't create dramatic narratives from small changes. Don't infer causation from correlation without strong evidence. Don't suggest actions for changes that are within normal variation. If a change is "interesting but not actionable", consider if it belongs in the report.
+- **Confidence-Based Filtering**: Prioritize findings with high confidence. If structured output shows low confidence, be extra cautious. If validation warnings exist, mention uncertainty or skip if too uncertain.
+- **If nothing significant happened**: If ALL metrics have LOW or NONE significance, write a very brief report (2-3 sentences) stating that nothing significant happened this week and the ecosystem remained stable. Do not create sections for each metric.
+- **Start with a Summary section** (when there are significant findings): Begin the report with a "## Summary" section that provides 2-4 sentences synthesizing the most important changes this week. This helps busy stakeholders quickly understand what matters. Focus on the key numbers and what they mean. Do NOT call it "Executive Summary" - just "Summary".
+- **CRITICAL: Analyze historical context**: For each significant finding, analyze and include historical context. Compare to recent weeks, months, and longer-term patterns. Ask yourself: Is this unusual? Is this a continuation of a trend? Is this a reversal? How does this compare to historical norms? Examples: "This is the largest weekly increase in 3 months", "Returning to levels seen in October", "Continuing a 4-week upward trend", "Breaking a 6-week stable pattern", "This represents a 15% deviation from the 3-month average", "unusual compared to recent patterns". Historical context helps stakeholders understand whether changes are significant or part of normal variation.
+- **Synthesize across metrics**: This is a unified weekly report, not individual metric reports. Group similar findings, highlight what matters most. Only include what deserves attention.
+- **Structure organically**: Organize the report in whatever way best tells the story of the week. Let the content drive the structure, not a template. If only one thing is significant, focus on that.
+- **Use section headers**: Break up the content with Markdown headings (##) to make it easy to scan. For example: "## Summary", "## Active Accounts by Sector", or "## P2P Client Activity". Use headers to separate different topics or themes. This makes the report easy to navigate and read.
+- **Focus on what matters**: Only include metrics with HIGH or MEDIUM significance. Don't give equal space to every metric - prioritize by significance, and skip LOW/NONE entirely.
+- **Be concise**: Stakeholders need quick insights, not detailed analysis. Get to the point. A weekly report should be scannable in 2-3 minutes, not a long read.
+- **Use specific numbers**: Include actual values and percentages (e.g., "grew from 39,297 to 41,107 (+4.6%)")
+- **Focus on business impact**: Not just what changed, but why it matters
+- **Avoid analytical language**: Don't say "modest increase" - say "grew 4.6%". Don't say "no anomalous spikes" - say "no unusual activity". Don't say "modest, broad-based increase" - say "grew 4.6% across sectors"
+- **Don't use meta-phrases**: Never say "What stakeholders need to know" or "BD should know" - just tell them directly. They're reading the report, so write as if speaking to them.
+- **Professional tone**: Keep language measured and factual. Even for significant changes, use professional language like "notable decline" or "significant shift" rather than dramatic phrases like "immediate attention needed" or "crisis".
+- **Reference charts naturally**: When mentioning charts, use friendly names naturally in the text
+- **No redundancy**: Don't repeat the same information in multiple sections
+- **No forced structure**: Don't create sections just to fill a template - only include what's needed to tell the story
 
 At the very TOP of your output, on a single line, write:
 
@@ -30,47 +85,8 @@ HIGHLIGHTED_METRICS: name1, name2, ...
 
 where each name is the exact technical metric name (e.g. api_p2p_discv4_clients_daily).
 This line is for internal processing only - it will not appear in the final report.
-List between 2 and 4 metrics. Then leave a blank line and write the portfolio summary.
-
-When choosing highlighted metrics, consider:
-- Magnitude of change (absolute and %).
-- Direction (good vs bad for BD).
-- Historical context (e.g. “largest move in 2 months”, “trend reversal”).
-- Risk or opportunity (user impact, infra constraints, protocol risk, revenue, etc.).
-- Business relevance (some metrics are more strategically important even for smaller moves).
-If several metrics are stable, say so and focus on the few that moved or are most relevant.
-
-Also:
-- If a metric report appears inconsistent with the dbt metadata (e.g. talking about the wrong concept,
-  implausible numbers, or confusing interpretation), mention that in your summary and treat that metric
-  as less reliable in your prioritization.
-
-### Output structure (after the HIGHLIGHTED_METRICS line)
-
-Write a single portfolio-level summary with Markdown sections:
-
-**Executive summary**
-- 2–3 sentences, plain language, no first-person.
-- Summarize what changed this week across the portfolio, focusing on highlighted metrics.
-
-**Highlights**
-- 3–5 bullets.
-- Each bullet should mention specific metrics using business-friendly names (based on their descriptions) and why they matter.
-- When relevant, refer to their charts using friendly names, e.g. "see the P2P client activity chart" or "the active accounts by sector headline chart".
-- **DO NOT** use technical metric names like `api_p2p_discv4_clients_daily` in your narrative.
-
-**Key numbers**
-- 3–7 bullets.
-- Include the most important numbers across metrics (levels and WoW deltas).
-- Always tie numbers back to specific metrics using business-friendly names (e.g., "P2P client activity" or "Active accounts by sector").
-- **DO NOT** use technical metric names.
-
-**Risks & opportunities**
-- 2–4 bullets on what BD should watch (degradation, capacity limits, user behavior shifts, protocol risks, etc.).
-
-**Outlook**
-- 2–3 bullets on what to monitor next week.
-- If relevant, mention what kind of follow-up analysis or external context would be useful.
+List metrics with HIGH or MEDIUM significance (can be 0, 1, or many - let the data drive it).
+Then leave a blank line and write the weekly report.
 
 ### Inputs
 
@@ -101,3 +117,76 @@ Columns:
 {% endif %}
 
 {% endfor %}
+
+{% if structured_findings %}
+### Structured Findings (Validated Data)
+
+For each metric, you have structured data with validated key numbers. Use these to ensure accuracy:
+
+{% for metric, findings in structured_findings.items() %}
+#### {{ metric }} — Structured Data
+**Significance**: {{ findings.get("structured", {}).get("significance", "UNKNOWN") }}
+**Confidence**: {{ findings.get("structured", {}).get("confidence", "unknown") }}
+
+**Key Numbers** (use these exact values in your narrative):
+{% set key_nums = findings.get("structured", {}).get("key_numbers", {}) %}
+- Last week value: {{ key_nums.get("value_last_week", "N/A") }}
+- Previous week value: {{ key_nums.get("value_prev_week", "N/A") }}
+- Change: {{ key_nums.get("change_absolute", "N/A") }} ({{ key_nums.get("change_percent", "N/A") }}%)
+- 4-week average: {{ key_nums.get("value_4wk_avg", "N/A") }}
+- 3-month average: {{ key_nums.get("value_3mo_avg", "N/A") }}
+
+**Statistical Evidence**:
+{% set stat_ev = findings.get("structured", {}).get("statistical_evidence", {}) %}
+- WoW change: {{ stat_ev.get("wow_change_pct", "N/A") }}%
+- Std devs from 4wk avg: {{ stat_ev.get("std_dev_from_4wk_avg", "N/A") }}
+- Within normal variation: {{ stat_ev.get("within_normal_variation", "N/A") }}
+- Is unusual: {{ stat_ev.get("is_unusual", "N/A") }}
+
+**Validation Status**: {{ findings.get("validation_status", "unknown") }}
+{% if findings.get("validation_warnings") %}
+**Validation Warnings**: {{ findings.get("validation_warnings", []) | join(", ") }}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights and (cross_metric_insights.get("correlations") or cross_metric_insights.get("ecosystem_patterns")) %}
+### Cross-Metric Analysis Insights
+
+The following ecosystem-level patterns were identified:
+
+{% if cross_metric_insights.get("correlations") %}
+**Correlations**:
+{% for corr in cross_metric_insights.get("correlations", []) %}
+- {{ corr.get("metric1", "") }} and {{ corr.get("metric2", "") }}: {{ corr.get("correlation_type", "") }} correlation ({{ corr.get("strength", "") }}) - {{ corr.get("evidence", "") }}
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights.get("ecosystem_patterns") %}
+**Ecosystem Patterns**:
+{% for pattern in cross_metric_insights.get("ecosystem_patterns", []) %}
+- {{ pattern.get("pattern", "") }} (affects: {{ pattern.get("affected_metrics", []) | join(", ") }}, significance: {{ pattern.get("significance", "") }})
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights.get("contradictions") %}
+**Contradictions**:
+{% for contr in cross_metric_insights.get("contradictions", []) %}
+- {{ contr.get("description", "") }} (metrics: {{ contr.get("metrics_involved", []) | join(", ") }}, possible explanation: {{ contr.get("possible_explanation", "") }})
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights.get("discovered_relationships") %}
+**Discovered Relationships** (for future analysis):
+{% for rel in cross_metric_insights.get("discovered_relationships", []) %}
+- {{ rel.get("analyzed_metric", "") }} ↔ {{ rel.get("catalog_metric", "") }}: {{ rel.get("reason", "") }}
+{% endfor %}
+{% endif %}
+
+{% if cross_metric_insights.get("summary") %}
+**Cross-Metric Summary**: {{ cross_metric_insights.get("summary", "") }}
+{% endif %}
+
+Use these insights to create a more coherent narrative that explains ecosystem-level dynamics, not just individual metric changes.
+{% endif %}

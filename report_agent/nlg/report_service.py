@@ -34,7 +34,40 @@ def generate_html_report(
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
-    narrative = connector.run_report(model)
+    result = connector.run_report(model)
+    
+    # Handle both dict (new) and str (backward compatibility)
+    if isinstance(result, dict):
+        narrative = result.get("narrative", "")
+        structured = result.get("structured", {})
+        validation_status = result.get("validation_status", "unknown")
+        validation_warnings = result.get("validation_warnings", [])
+        
+        # Check if this is an API failure - if so, raise exception
+        if validation_status == "errors" and narrative.startswith("Error:"):
+            error_msg = narrative.replace("Error: ", "")
+            raise Exception(f"API call failed for {model}: {error_msg}")
+        
+        # Save structured output
+        structured_dir = out_root / "structured"
+        structured_dir.mkdir(parents=True, exist_ok=True)
+        structured_path = structured_dir / f"{model}.json"
+        import json
+        structured_path.write_text(json.dumps({
+            "structured": structured,
+            "validation_status": validation_status,
+            "validation_warnings": validation_warnings,
+        }, indent=2), encoding="utf-8")
+        
+        # Log validation warnings if any
+        if validation_warnings:
+            log.warning(f"Validation warnings for {model}: {validation_warnings}")
+    else:
+        # Backward compatibility: treat as narrative string
+        narrative = result
+        structured = {}
+        validation_status = "unknown"
+        validation_warnings = []
 
     text_dir = out_root / text_subdir
     text_dir.mkdir(parents=True, exist_ok=True)

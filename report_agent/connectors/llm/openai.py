@@ -42,12 +42,21 @@ class OpenAICodeInterpreterConnector(LLMConnector):
 
     def __init__(self, api_key: str, model_name: str = "gpt-4.1"):
         super().__init__(api_key, model_name)
-        self.client = OpenAI(api_key=api_key)
+        # Disable automatic retries to save credits
+        self.client = OpenAI(
+            api_key=api_key,
+            max_retries=0,  # Disable retries
+            http_client=httpx.Client(
+                timeout=httpx.Timeout(300.0, connect=10.0),  # 5 min total, 10s connect
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            ),
+        )
         self._api_key = api_key  # keep for HTTP fallback downloads
         self.tools = [{"type": "code_interpreter", "container": {"type": "auto"}}]
         self._last_artifacts: Optional[dict] = None
         self._last_dataframe: Optional[pd.DataFrame] = None
         self._last_model_name: Optional[str] = None
+        self._last_validation: Optional[dict] = None
 
     # ---- Tools API (no-op here) ----
 
@@ -96,7 +105,7 @@ class OpenAICodeInterpreterConnector(LLMConnector):
 
     # ---- Public API expected by callers ----
 
-    def run_report(self, model_name: str, lookback_days: int | None = None) -> str:
+    def run_report(self, model_name: str, lookback_days: int | None = None) -> dict:
         """
         High-level entrypoint used by the CLI / report_service.
 
@@ -104,7 +113,16 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         - Fetches the appropriate data slice.
         - Writes CSV/schema/meta/docs to a temp dir.
         - Invokes the Responses API with code_interpreter.
-        - Returns the final narrative text.
+        - Parses structured output and validates significance.
+        - Returns dict with narrative, structured data, and validation results.
+        
+        Returns:
+            {
+                "narrative": str,
+                "structured": dict,
+                "validation_status": str ("valid" | "warnings" | "errors"),
+                "validation_warnings": list,
+            }
         """
         # 1) Load configs/registry and fetch raw data
         cfg = load_configs()
@@ -122,11 +140,21 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             df = loader.fetch_snapshot(model_name)
 
         if df is None or df.empty:
-            return f"No data returned for model '{model_name}'"
+            return {
+                "narrative": f"No data returned for model '{model_name}'",
+                "structured": {},
+                "validation_status": "errors",
+                "validation_warnings": [f"No data returned for model '{model_name}'"],
+            }
 
         # For time series, we require a date column; for snapshots we allow tables without date
         if kind == "time_series" and "date" not in df.columns:
-            return f"Model '{model_name}' has no 'date' column; cannot proceed."
+            return {
+                "narrative": f"Model '{model_name}' has no 'date' column; cannot proceed.",
+                "structured": {},
+                "validation_status": "errors",
+                "validation_warnings": [f"Model '{model_name}' has no 'date' column"],
+            }
 
         # Store the dataframe for potential reuse (e.g., saving CSV without re-fetching)
         self._last_dataframe = df.copy()  # Store a copy to avoid mutations
@@ -187,9 +215,10 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             # Silent fallback; schema/meta/CSV are enough
             pass
 
-        # Build model catalog and pre-fetch general insight models (server-side, secure)
+        # Build model catalog (optional context for LLM)
+        # Note: General insight models are not included in per-metric reports - they focus on single metric analysis
         catalog_filename = None
-        pre_fetched_models = {}
+        pre_fetched_models = {}  # Empty - not used for per-metric reports
         catalog = {}
         try:
             # Build model catalog for model_catalog.json (optional context for LLM)
@@ -198,48 +227,9 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                 catalog_path = os.path.join(tmpdir, "model_catalog.json")
                 save_catalog_to_file(catalog, catalog_path)
                 catalog_filename = "model_catalog.json"
-            
-            # Pre-fetch fixed general insight models (always the same 5 models for ecosystem context)
-            general_insight_models = registry.get_general_insight_models()
-            if general_insight_models:
-                log.info(f"Pre-fetching {len(general_insight_models)} general insight models: {general_insight_models}")
-                
-                for insight_model_name in general_insight_models:
-                    try:
-                        # Determine if it's time_series or snapshot from catalog if available
-                        is_time_series = True
-                        if catalog and insight_model_name in catalog:
-                            is_time_series = catalog[insight_model_name].get("kind") == "time_series"
-                        
-                        # Fetch data (30 days for time series, full table for snapshots)
-                        if is_time_series:
-                            sql = f"""
-                                SELECT *
-                                FROM {loader.db.read.database}.{insight_model_name}
-                                WHERE date >= today() - INTERVAL 30 DAY
-                                ORDER BY date ASC
-                            """
-                            df_insight = loader.db.fetch_df(sql)
-                        else:
-                            sql = f"SELECT * FROM {loader.db.read.database}.{insight_model_name}"
-                            df_insight = loader.db.fetch_df(sql)
-                        
-                        insight_csv_path = os.path.join(tmpdir, f"{insight_model_name}.csv")
-                        df_insight.to_csv(insight_csv_path, index=False)
-                        pre_fetched_models[insight_model_name] = os.path.basename(insight_csv_path)
-                        log.info(f"  ✓ Pre-fetched {insight_model_name} ({len(df_insight)} rows)")
-                    except Exception as e:
-                        # Skip if can't fetch (model might not exist or have issues)
-                        log.warning(f"  ✗ Failed to pre-fetch {insight_model_name}: {e}")
-                        pass
-                
-                if pre_fetched_models:
-                    log.info(f"Pre-fetched {len(pre_fetched_models)}/{len(general_insight_models)} general insight models: {list(pre_fetched_models.keys())}")
-                else:
-                    log.info(f"No general insight models successfully pre-fetched")
         except Exception as e:
-            # Log but don't fail - catalog and pre-fetching are optional
-            log.warning(f"Could not build model catalog or pre-fetch general insight models: {e}")
+            # Log but don't fail - catalog is optional
+            log.warning(f"Could not build model catalog: {e}")
 
         # 3) Build the free-form prompt (template depends on kind)
         prompt = build_ci_prompt(
@@ -251,7 +241,7 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             meta_filename=os.path.basename(meta_path),
             docs_filename=docs_filename,
             has_catalog=bool(catalog_filename),
-            pre_fetched_models=pre_fetched_models,
+            pre_fetched_models={},  # Empty - general insight models not used for per-metric reports
             catalog=catalog if catalog_filename else None,
         )
 
@@ -279,19 +269,7 @@ class OpenAICodeInterpreterConnector(LLMConnector):
                 catalog_file = self.client.files.create(file=f_catalog, purpose="assistants")
                 file_ids.append(catalog_file.id)
         
-        # Upload pre-fetched general insight model CSVs (server-side fetched, secure)
-        # Track file_id -> model_name and filename -> model_name mappings for usage detection
-        pre_fetched_file_ids: dict[str, str] = {}  # file_id -> model_name
-        pre_fetched_filenames: dict[str, str] = {}  # filename -> model_name
-        if pre_fetched_models:
-            log.info(f"Uploading {len(pre_fetched_models)} general insight models to container")
-            for insight_name, csv_filename in pre_fetched_models.items():
-                insight_csv_path = os.path.join(tmpdir, csv_filename)
-                with open(insight_csv_path, "rb") as f_insight:
-                    insight_file = self.client.files.create(file=f_insight, purpose="assistants")
-                    file_ids.append(insight_file.id)
-                    pre_fetched_file_ids[insight_file.id] = insight_name
-                    pre_fetched_filenames[csv_filename] = insight_name
+        # Note: General insight models are not used for per-metric reports
         
         # 5) Create the response with a code_interpreter container that includes these files
         tools = [
@@ -309,7 +287,8 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             "Follow the task specification given in the input."
         )
 
-        resp = self.client.responses.create(
+        try:
+            resp = self.client.responses.create(
             model=self.model_name,
             tools=tools,
             tool_choice="required",
@@ -319,6 +298,16 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             input=prompt,
             temperature=0.2,
         )
+        except Exception as e:
+            # If API call fails, return error dict instead of raising
+            error_msg = str(e)
+            log.error(f"API call failed for {model_name}: {error_msg}")
+            return {
+                "narrative": f"Error: {error_msg}",
+                "structured": {},
+                "validation_status": "errors",
+                "validation_warnings": [f"API call failed: {error_msg}"],
+            }
 
         # Collect container artifacts (citations)
         try:
@@ -326,108 +315,19 @@ class OpenAICodeInterpreterConnector(LLMConnector):
         except Exception:
             self._last_artifacts = None
 
-        # 6) Return final text (try several shapes)
-        text = getattr(resp, "output_text", None)
-        if isinstance(text, str) and text.strip():
-            # Check if any pre-fetched models were used in the analysis
-            self._check_pre_fetched_usage(text, pre_fetched_models, pre_fetched_file_ids, pre_fetched_filenames)
-            return text
-
-        try:
-            parts: List[str] = []
-            output = getattr(resp, "output", None)
-            if isinstance(output, list):
-                for item in output:
-                    if isinstance(item, dict) and item.get("type") == "message":
-                        for c in item.get("content", []) or []:
-                            if c.get("type") in ("output_text", "text"):
-                                parts.append(c.get("text", ""))
-                    elif hasattr(item, "content"):
-                        for c in (item.content or []):
-                            if getattr(c, "type", None) in ("output_text", "text"):
-                                parts.append(getattr(c, "text", ""))
-            if parts:
-                text = "\n".join(p for p in parts if p)
-                self._check_pre_fetched_usage(text, pre_fetched_models, pre_fetched_file_ids, pre_fetched_filenames)
-                return text
-        except Exception:
-            pass
-
-        # Last resort
-        text = str(resp)
-        # Check if any pre-fetched models were used in the analysis
-        self._check_pre_fetched_usage(text, pre_fetched_models, pre_fetched_file_ids, pre_fetched_filenames)
-        return text
-
-    def _check_pre_fetched_usage(
-        self, 
-        text: str, 
-        pre_fetched_models: dict, 
-        pre_fetched_file_ids: dict[str, str],
-        pre_fetched_filenames: dict[str, str]
-    ):
-        """
-        Check if any pre-fetched models were used as context in the LLM analysis.
+        # 6) Parse structured output and validate
+        narrative, structured_data = self._parse_structured_output(resp)
         
-        Uses two detection methods:
-        1. Container file citations (reliable) - files explicitly referenced by the LLM
-        2. Text mentions (fallback) - model names or CSV filenames in narrative
+        # 7) Validate significance assessment
+        validation_result = self._validate_significance(narrative, structured_data, df)
+        self._last_validation = validation_result
         
-        Args:
-            text: The LLM output text
-            pre_fetched_models: Dict mapping model_name -> csv_filename
-            pre_fetched_file_ids: Dict mapping file_id -> model_name for pre-fetched models
-            pre_fetched_filenames: Dict mapping filename -> model_name for pre-fetched models
-        """
-        if not pre_fetched_models:
-            return
-        
-        # Method 1: Check container file citations (most reliable)
-        # Files that were explicitly accessed/cited by the LLM
-        cited_models = set()
-        artifacts = self._last_artifacts or {}
-        total_cited_files = len(artifacts.get("files", []))
-        
-        for file_info in artifacts.get("files", []):
-            file_id = file_info.get("file_id")
-            filename = file_info.get("filename", "unknown")
-            
-            # Try matching by file_id first
-            if file_id and file_id in pre_fetched_file_ids:
-                cited_models.add(pre_fetched_file_ids[file_id])
-            # Also try matching by filename (in case container uses different file_ids)
-            elif filename and filename in pre_fetched_filenames:
-                cited_models.add(pre_fetched_filenames[filename])
-        
-        # Method 2: Check text output (fallback - may miss usage due to business-friendly language)
-        text_mentioned_models = []
-        if text:
-            text_lower = text.lower()
-            for model_name, csv_filename in pre_fetched_models.items():
-                if model_name.lower() in text_lower or csv_filename.lower() in text_lower:
-                    text_mentioned_models.append(model_name)
-        
-        # Combine both methods
-        all_used_models = cited_models | set(text_mentioned_models)
-        
-        if all_used_models:
-            detection_methods = []
-            if cited_models:
-                detection_methods.append(f"file citations ({len(cited_models)})")
-            if text_mentioned_models:
-                detection_methods.append(f"text mentions ({len(text_mentioned_models)})")
-            
-            log.info(
-                f"✓ LLM used {len(all_used_models)}/{len(pre_fetched_models)} pre-fetched models as context: {sorted(all_used_models)} "
-                f"[detected via: {', '.join(detection_methods)}]"
-            )
-        else:
-            # More informative message about what was checked
-            citation_info = f"({total_cited_files} files cited in response, none matched pre-fetched models)"
-            log.info(
-                f"⚠ LLM did not appear to use any of the {len(pre_fetched_models)} pre-fetched models: {list(pre_fetched_models.keys())} "
-                f"{citation_info}"
-            )
+        return {
+            "narrative": narrative,
+            "structured": structured_data,
+            "validation_status": validation_result["status"],
+            "validation_warnings": validation_result.get("warnings", []),
+        }
 
     # ---------- Artifacts (citations) ----------
 
@@ -506,6 +406,156 @@ class OpenAICodeInterpreterConnector(LLMConnector):
             if df is not None:
                 return df.copy()  # Return a copy to avoid mutations
         return None
+
+    def get_last_validation(self) -> Optional[dict]:
+        """Return validation results from the most recent run (or None)."""
+        return getattr(self, "_last_validation", None)
+
+    # ---------- Structured Output Parsing & Validation ----------
+
+    def _parse_structured_output(self, resp) -> tuple[str, dict]:
+        """
+        Extract JSON and narrative from LLM response.
+        
+        Returns:
+            tuple: (narrative_text, structured_dict)
+        """
+        # Try to get text from response
+        text = getattr(resp, "output_text", None)
+        if not text or not isinstance(text, str):
+            # Try alternative extraction methods
+            try:
+                parts: List[str] = []
+                output = getattr(resp, "output", None)
+                if isinstance(output, list):
+                    for item in output:
+                        if isinstance(item, dict) and item.get("type") == "message":
+                            for c in item.get("content", []) or []:
+                                if c.get("type") in ("output_text", "text"):
+                                    parts.append(c.get("text", ""))
+                        elif hasattr(item, "content"):
+                            for c in (item.content or []):
+                                if getattr(c, "type", None) in ("output_text", "text"):
+                                    parts.append(getattr(c, "text", ""))
+                if parts:
+                    text = "\n".join(p for p in parts if p)
+            except Exception:
+                pass
+        
+        if not text:
+            text = str(resp)
+        
+        # Try to extract JSON block
+        import re
+        json_match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
+        if json_match:
+            try:
+                structured = json.loads(json_match.group(1))
+                narrative = text.replace(json_match.group(0), "").strip()
+                return narrative, structured
+            except json.JSONDecodeError:
+                pass
+        
+        # Fallback: try to find JSON anywhere (without code block markers)
+        json_match = re.search(r'\{[^{}]*"significance"[^{}]*\}', text, re.DOTALL)
+        if json_match:
+            try:
+                structured = json.loads(json_match.group(0))
+                narrative = text.replace(json_match.group(0), "").strip()
+                return narrative, structured
+            except json.JSONDecodeError:
+                pass
+        
+        # No structured output found - return text as narrative
+        return text, {}
+
+    def _validate_significance(self, narrative: str, structured: dict, df: pd.DataFrame) -> dict:
+        """
+        Validate that significance assessment is justified by the data.
+        Prevents over-interpretation.
+        
+        Returns:
+            dict with status ("valid" | "warnings" | "errors") and warnings list
+        """
+        warnings = []
+        errors = []
+        
+        if not structured:
+            return {"status": "errors", "warnings": ["No structured output found"], "errors": ["No structured output found"]}
+        
+        significance = structured.get("significance", "").upper()
+        stat_evidence = structured.get("statistical_evidence", {})
+        
+        # Calculate actual statistics from data
+        if "date" in df.columns and "value" in df.columns:
+            try:
+                # Aggregate by week
+                df_copy = df.copy()
+                df_copy["date"] = pd.to_datetime(df_copy["date"], errors="coerce")
+                df_copy = df_copy.dropna(subset=["date"])
+                
+                if len(df_copy) > 0:
+                    df_copy["week"] = df_copy["date"].dt.to_period("W")
+                    
+                    # Handle multiple rows per date (aggregate by date first, then by week)
+                    if "label" in df_copy.columns:
+                        # Group by date and label, sum values, then group by week
+                        daily = df_copy.groupby(["date", "label"])["value"].sum().reset_index()
+                        daily["week"] = daily["date"].dt.to_period("W")
+                        weekly = daily.groupby("week")["value"].sum().reset_index()
+                    else:
+                        daily = df_copy.groupby("date")["value"].sum().reset_index()
+                        daily["week"] = daily["date"].dt.to_period("W")
+                        weekly = daily.groupby("week")["value"].sum().reset_index()
+                    
+                    if len(weekly) >= 4:
+                        last_week = weekly.iloc[-1]["value"]
+                        prev_week = weekly.iloc[-2]["value"] if len(weekly) >= 2 else None
+                        four_week_values = weekly.iloc[-4:]["value"]
+                        four_week_avg = four_week_values.mean()
+                        four_week_std = four_week_values.std()
+                        
+                        if prev_week and four_week_std > 0:
+                            wow_change_pct = ((last_week - prev_week) / prev_week) * 100 if prev_week != 0 else 0
+                            std_devs_away = (last_week - four_week_avg) / four_week_std
+                            
+                            # Validate significance assessment
+                            if significance == "HIGH":
+                                # HIGH should have strong evidence
+                                if abs(wow_change_pct) < 15:
+                                    warnings.append(f"HIGH significance but only {wow_change_pct:.1f}% change (expected >15%)")
+                                if abs(std_devs_away) < 2:
+                                    warnings.append(f"HIGH significance but only {std_devs_away:.1f} std devs from avg (expected >2)")
+                            
+                            if significance == "MEDIUM":
+                                # MEDIUM should have some evidence
+                                if abs(wow_change_pct) < 5:
+                                    warnings.append(f"MEDIUM significance but only {wow_change_pct:.1f}% change (expected >5%)")
+                            
+                            # Check if within normal variation
+                            if abs(std_devs_away) < 1 and significance in ["HIGH", "MEDIUM"]:
+                                warnings.append(f"Significance {significance} but change is within normal variation (±1 std dev)")
+                            
+                            # Check if it's trend continuation (not unusual)
+                            if len(weekly) >= 3:
+                                trend_direction = "increasing" if weekly.iloc[-1]["value"] > weekly.iloc[-2]["value"] else "decreasing"
+                                prev_trend = "increasing" if weekly.iloc[-2]["value"] > weekly.iloc[-3]["value"] else "decreasing"
+                                if trend_direction == prev_trend and significance == "HIGH":
+                                    warnings.append(f"HIGH significance but change continues existing {trend_direction} trend (may not be unusual)")
+            except Exception as e:
+                # Don't fail validation on calculation errors, just log
+                log.debug(f"Error calculating validation statistics: {e}")
+        
+        # Check significance is present
+        if not significance or significance not in ["HIGH", "MEDIUM", "LOW", "NONE"]:
+            errors.append("Missing or invalid significance assessment (must be HIGH/MEDIUM/LOW/NONE)")
+        
+        status = "errors" if errors else ("warnings" if warnings else "valid")
+        return {
+            "status": status,
+            "warnings": warnings,
+            "errors": errors,
+        }
 
     # ---------- Downloads ----------
 

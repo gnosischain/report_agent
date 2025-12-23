@@ -68,15 +68,17 @@ Full model catalog (`model_catalog.json`) available. Load with `json.load(open('
 - **This plot is REQUIRED and must be created for every metric. You MUST run matplotlib code to generate this plot.**
 - **You must actually execute code like `plt.savefig('plots/{{ model }}_headline_weekly.png')` - do not skip this step.**
 - What: total (all segments) aggregated to weekly using the main `value` measure.
-- Highlight: clearly highlight the **last two weeks** (e.g., shaded span or distinct markers).
+- Highlight: clearly highlight the **last two complete weeks** (e.g., shaded span or distinct markers).
 - Annotate on the chart the WoW delta (absolute and %), e.g., "+72 (+8.2% WoW)".
+- **Important**: Only include complete weeks (Monday-Sunday). Exclude the current partial week.
 - Title: Use a short, readable name based on the metric description (e.g., "Active Accounts by Sector — Weekly total" or "P2P Client Activity — Weekly total"), NOT the technical model name "{{ model }}". Include a subtitle with the key number(s).
 - **Execute code to save:** `plt.savefig('plots/{{ model }}_headline_weekly.png')` - this file MUST exist after your code runs.
 - Then display the plot so it's cited in your output.
 
-**Figure 2 — Last week vs prior week by top 5 segments**
+**Figure 2 — Last complete week vs previous complete week by top 5 segments**
 - What: grouped bars for **top 5 labels by absolute change** week-over-week.
-- Bars: last week vs previous week side-by-side; y-axis starts at 0; add exact values as labels.
+- Bars: last complete week (Monday-Sunday) vs previous complete week side-by-side; y-axis starts at 0; add exact values as labels.
+- **Important**: Only compare complete weeks. Exclude the current partial week from analysis.
 - Sort: by absolute change descending (largest mover first).
 - Title: Use a short, readable name based on the metric description (e.g., "Active Accounts by Sector — Top 5 movers" or "P2P Client Activity — Top 5 movers"), NOT the technical model name "{{ model }}".
 - **Execute code to save:** `plt.savefig('plots/{{ model }}_top5_wow.png')` - this file MUST exist after your code runs.
@@ -93,19 +95,122 @@ Implementation notes:
   - Use bright, high-contrast colors for data series (avoid dark colors)
   - Example: `plt.style.use('dark_background')` or manually set `facecolor='#0b0d12'`, `text.color='#e7edf3'`, `axes.facecolor='#121722'`
 
-## Final deliverable (this is the ONLY thing you should output)
-- **Executive summary (one sentence, no first-person):** Start with one of
-  {Significant increase, Significant decrease, Stable, Mixed} and state the key
-  number(s) with WoW % in plain language.
-- Then a concise BD-facing summary (≈150–300 words), with sections:
-  - **Highlights** — 3–5 bullets on what changed and why (plain language).
-  - **Key numbers** — totals and WoW deltas (absolute + %), top movers.
-  - **Drivers & notes** — brief bullets (segments, timing, anomalies, caveats).
-  - **Outlook / Watch next week** — 2–3 bullets (actionable).
+## Significance Assessment Guidelines (CRITICAL)
+
+**Be conservative. Only mark as HIGH/MEDIUM if change is truly noteworthy.**
+
+**HIGH Significance** - Only if ALL of these are true:
+- Change is >15% week-over-week AND
+- Change represents >2 standard deviations from 4-week average AND
+- Change is unusual compared to historical patterns (not part of normal variation) AND
+- Change has clear business impact (opportunity, risk, or notable shift)
+
+**MEDIUM Significance** - Only if:
+- Change is >10% week-over-week OR >1.5 standard deviations from 4-week average AND
+- Change is somewhat unusual (not clearly normal variation) AND
+- Change has some business relevance
+
+**LOW Significance** - If:
+- Change is 5-10% week-over-week but within normal variation OR
+- Change is notable in magnitude but clearly part of expected pattern/trend
+
+**NONE Significance** - If:
+- Change is <5% week-over-week OR
+- Change is within normal variation (within 1 standard deviation of 4-week avg) OR
+- No meaningful change detected
+
+**CRITICAL: Avoid False Positives**
+- A 20% increase that's part of a steady 4-week upward trend is NOT HIGH significance - it's continuation of a pattern
+- A 10% change that's within the normal weekly variation range is NOT significant
+- Only mark as HIGH if the change is genuinely unusual and noteworthy
+- When in doubt, choose a lower significance level
+
+**Confidence Assessment**
+- High confidence: Clear statistical evidence, unusual pattern, strong historical context
+- Medium confidence: Some evidence but some ambiguity
+- Low confidence: Weak evidence, could be noise
+
+Calculate and report:
+- Standard deviation of last 4 weeks
+- How many standard deviations this week's change represents
+- Whether this change is within normal variation range
+
+## Your Task: Analytical Reasoning & Significance Detection
+
+Analyze this metric to determine if anything significant happened **in the last complete week** (Monday-Sunday of last week). Your goal is to provide analytical findings that will be used to create a unified weekly report.
+
+**CRITICAL: Week Definition**
+- **"This week"** means the **last complete week** (Monday-Sunday of the previous week)
+- **Exclude the current partial week** from your analysis - do not include any days from the current week
+- Only compare complete weeks to complete weeks (last complete week vs previous complete week)
+- If today is Wednesday, "this week" means last Monday-Sunday, not Monday-Wednesday
+
+**Key Questions to Answer:**
+- Is there anything noteworthy in the last complete week? (Significance: HIGH/MEDIUM/LOW/NONE)
+- What changed? (magnitude, direction, historical context)
+- **CRITICAL: Historical context analysis**: How does this week compare to recent weeks, months, and longer-term patterns? Is this change unusual or part of a trend? Compare to: previous week, 4-week average, 3-month average, same period last month, any notable historical patterns. This historical analysis is essential for understanding significance.
+- Why does it matter? (business impact, trends, anomalies)
+- What patterns or anomalies do you see?
+- What evidence supports your findings?
+
+**Output Format (CRITICAL - You MUST provide structured JSON):**
+
+You MUST provide your response in the following format. Start with a JSON block, then provide your narrative:
+
+```json
+{
+  "significance": "HIGH" | "MEDIUM" | "LOW" | "NONE",
+  "confidence": "high" | "medium" | "low",
+  "statistical_evidence": {
+    "wow_change_pct": <number>,
+    "std_dev_from_4wk_avg": <number>,
+    "within_normal_variation": true | false,
+    "is_unusual": true | false,
+    "is_trend_continuation": true | false
+  },
+  "key_numbers": {
+    "value_last_week": <number>,
+    "value_prev_week": <number>,
+    "change_absolute": <number>,
+    "change_percent": <number>,
+    "value_4wk_avg": <number>,
+    "value_3mo_avg": <number> | null,
+    "deviation_from_avg": <number>
+  },
+  "historical_context": {
+    "comparison_to_4wk_avg": "<description>",
+    "comparison_to_3mo_avg": "<description>",
+    "trend_direction": "increasing" | "decreasing" | "stable" | "volatile",
+    "unusual_patterns": ["<pattern1>", "<pattern2>"]
+  },
+  "related_metrics_hypothesis": [
+    {
+      "metric_name": "<model_name_from_catalog>",
+      "reason": "<why this might be related>",
+      "expected_correlation": "positive" | "negative" | "unknown"
+    }
+  ]
+}
+```
+
+Then provide your full narrative text after the JSON block.
+
+**CRITICAL:**
+- The `key_numbers` must be EXACT values you calculated from the data
+- The `narrative` should reference these exact numbers
+- If you identify potentially related metrics from the catalog, list them in `related_metrics_hypothesis`
+- The narrative comes AFTER the JSON block
+
+**Important Guidelines:**
+- **CRITICAL: Only report when significant**: If significance is LOW or NONE, provide ONLY the significance assessment in JSON and optionally one brief sentence in narrative. Do NOT provide detailed analysis, change analysis, or insights for LOW/NONE significance metrics. The weekly report will skip these entirely.
+- **For HIGH/MEDIUM significance only**: Provide full analytical findings including change analysis, **detailed historical context**, insights, and supporting data in both JSON and narrative.
+- **Historical context is essential**: Always analyze how this week compares to historical patterns. Include comparisons like: "largest change in X weeks/months", "continuing a Y-week trend", "returning to levels seen in [period]", "X% deviation from 3-month average", "unusual compared to recent patterns". This context is critical for understanding significance.
+- **If multiple significant things happened**: Structure your findings accordingly - don't force a rigid format.
+- **Focus on analytical reasoning**: Provide evidence-based analysis, not polished BD prose. The weekly report will handle BD-friendly synthesis.
+- **Include specific numbers**: Always include actual values, percentages, comparisons to historical periods (but only for HIGH/MEDIUM significance). These must match the numbers in your JSON.
+- **Use business-friendly language**: Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts by sector", "P2P client activity", "transaction volume").
 - Do **not** include code, logs, or "first I did X" narration.
-- Do **not** include file paths in the text; refer generically to the "headline trend"
-  and "movers chart".
-- **CRITICAL**: Use business-friendly language throughout. Never mention the technical model name `{{ model }}` in your narrative. Use descriptive phrases based on what the metric actually measures (e.g., "active accounts by sector", "P2P client activity", "transaction volume").
+- Do **not** include file paths in the text; refer generically to the "headline trend" and "movers chart".
 
 ## Guardrails
 Allowed: pandas, numpy, matplotlib, json. No network calls. File I/O: read provided files, save plots to `plots/`. Fix errors silently, keep them out of narrative.

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -29,7 +32,7 @@ class MetricDoc:
 
 def _load_metric_texts(metric_reports: List[Tuple[str, Path]], out_dir: Path) -> Dict[str, str]:
     """
-    Read per-metric report text from reports/text/<metric>.txt,
+    Read per-metric analytical findings from reports/text/<metric>.txt,
     using the same out_dir as used for HTML reports.
     """
     text_dir = out_dir / "text"
@@ -43,6 +46,67 @@ def _load_metric_texts(metric_reports: List[Tuple[str, Path]], out_dir: Path) ->
             continue
 
     return texts
+
+
+def _load_structured_findings(metric_reports: List[Tuple[str, Path]], out_dir: Path) -> Dict[str, dict]:
+    """
+    Load structured findings from reports/structured/<metric>.json.
+    """
+    structured_dir = out_dir / "structured"
+    findings: Dict[str, dict] = {}
+    
+    for metric, _html_path in metric_reports:
+        structured_path = structured_dir / f"{metric}.json"
+        if structured_path.exists():
+            try:
+                findings[metric] = json.loads(structured_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+    
+    return findings
+
+
+def _load_cross_metric_insights(out_dir: Path) -> dict:
+    """Load cross-metric insights if available."""
+    insights_path = out_dir / "cross_metric_insights.json"
+    if insights_path.exists():
+        try:
+            return json.loads(insights_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _filter_low_confidence_findings(
+    metric_findings: Dict[str, dict],
+    validation_results: Dict[str, dict]
+) -> Dict[str, dict]:
+    """
+    Filter out findings with low confidence or validation warnings.
+    """
+    filtered = {}
+    
+    for metric, findings in metric_findings.items():
+        validation = validation_results.get(metric, {})
+        
+        # Skip if validation has errors
+        if validation.get("status") == "errors":
+            continue
+        
+        # Get structured data
+        structured = findings.get("structured", {})
+        significance = structured.get("significance", "").upper()
+        confidence = structured.get("confidence", "").lower()
+        
+        # Skip MEDIUM with low confidence and warnings
+        if significance == "MEDIUM":
+            if confidence == "low" and validation.get("warnings"):
+                # Skip low-confidence MEDIUM with validation warnings
+                continue
+        
+        filtered[metric] = findings
+    
+    return filtered
 
 
 def _load_metric_docs(metric_names: List[str]) -> Dict[str, MetricDoc]:
@@ -75,7 +139,12 @@ def _load_metric_docs(metric_names: List[str]) -> Dict[str, MetricDoc]:
     return metric_docs
 
 
-def _build_summary_prompt(metric_texts: Dict[str, str], metric_docs: Dict[str, MetricDoc]) -> str:
+def _build_summary_prompt(
+    metric_texts: Dict[str, str],
+    metric_docs: Dict[str, MetricDoc],
+    structured_findings: Dict[str, dict] = None,
+    cross_metric_insights: dict = None,
+) -> str:
     tpl = _env.get_template("summary_prompt.j2")
     docs_for_template = {
         m: {
@@ -84,7 +153,12 @@ def _build_summary_prompt(metric_texts: Dict[str, str], metric_docs: Dict[str, M
         }
         for m, d in metric_docs.items()
     }
-    return tpl.render(metric_reports=metric_texts, metric_docs=docs_for_template)
+    return tpl.render(
+        metric_reports=metric_texts,
+        metric_docs=docs_for_template,
+        structured_findings=structured_findings or {},
+        cross_metric_insights=cross_metric_insights or {},
+    )
 
 
 def _parse_highlighted_metrics(output: str) -> List[str]:
@@ -111,7 +185,7 @@ def _parse_highlighted_metrics(output: str) -> List[str]:
 def _strip_highlight_header(output: str) -> str:
     """
     Remove the 'HIGHLIGHTED_METRICS: ...' line and any immediately following blank lines.
-    Returns the cleaned summary body (Markdown).
+    Returns the cleaned weekly report body (Markdown).
     """
     lines = output.splitlines()
     if not lines:
@@ -175,7 +249,7 @@ def _render_summary_page(
     out_path: Path,
 ) -> Path:
     """
-    Render the final summary HTML page, including links to per-metric reports
+    Render the final weekly report HTML page, including links to per-metric reports
     and embedding plots for highlighted metrics.
     """
     tpl = _env.get_template("summary_page.html.j2")
@@ -198,38 +272,70 @@ def _render_summary_page(
         display_name = registry.get_display_name(metric) if registry else metric
         highlighted_with_names.append((metric, display_name))
 
+    # Get current date for the weekly report header
+    report_date = datetime.now().strftime("%B %d, %Y")
+    
     html = tpl.render(
         summary_html=summary_html,
         highlighted_metrics=highlighted_with_names,
         per_metric_reports=per_metric_rel,
         plots_by_metric=plots_by_metric,
+        generated_at=report_date,
     )
     out_path.write_text(html, encoding="utf-8")
     return out_path
 
 
-def generate_portfolio_summary(
+def generate_weekly_report(
     metric_reports: List[Tuple[str, Path]],
     out_dir: str = "reports",
 ) -> Path:
     """
-    Generate a cross-metric portfolio summary.
+    Generate a unified weekly report that synthesizes analytical findings across all metrics.
 
     metric_reports: list of (metric_name, html_path) for per-metric reports
     out_dir: base reports directory (same used for HTML + plots + text)
 
-    Returns the path to the summary HTML.
+    Returns the path to the weekly report HTML (saved as index.html).
     """
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 
+    # Copy Gnosis logo to reports directory if it exists
+    logo_src = Path(__file__).parent.parent.parent / "img" / "Gnosis (1).svg"
+    logo_dst = out_root / "img" / "Gnosis (1).svg"
+    if logo_src.exists():
+        logo_dst.parent.mkdir(exist_ok=True)
+        shutil.copy2(logo_src, logo_dst)
+
     metric_texts = _load_metric_texts(metric_reports, out_root)
     if not metric_texts:
-        raise ValueError("No metric report texts found; cannot build portfolio summary.")
+        raise ValueError("No metric analytical findings found; cannot build weekly report.")
 
+    # Load structured findings
+    structured_findings = _load_structured_findings(metric_reports, out_root)
+    
+    # Load cross-metric insights if available
+    cross_metric_insights = _load_cross_metric_insights(out_root)
+    
+    # Filter low-confidence findings
+    validation_results = {
+        metric: {
+            "status": findings.get("validation_status", "unknown"),
+            "warnings": findings.get("validation_warnings", []),
+        }
+        for metric, findings in structured_findings.items()
+    }
+    filtered_findings = _filter_low_confidence_findings(structured_findings, validation_results)
+    
     metric_docs = _load_metric_docs(list(metric_texts.keys()))
 
-    prompt = _build_summary_prompt(metric_texts, metric_docs)
+    prompt = _build_summary_prompt(
+        metric_texts,
+        metric_docs,
+        structured_findings=filtered_findings,
+        cross_metric_insights=cross_metric_insights,
+    )
 
     cfg = load_configs()
     api_key = cfg["llm"]["api_key"]
@@ -239,7 +345,7 @@ def generate_portfolio_summary(
     resp = client.chat.completions.create(
         model=model_name,
         messages=[
-            {"role": "system", "content": "You are a senior data analyst writing a weekly portfolio summary."},
+            {"role": "system", "content": "You are a senior data analyst writing a unified weekly report."},
             {"role": "user", "content": prompt},
         ],
         temperature=0.3,
