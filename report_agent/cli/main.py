@@ -57,16 +57,13 @@ def main():
     openai_model_name = config.llm.model
 
     # Initialize shared dependencies (composition root)
-    # These are created once and shared across all pipeline instances
+    # NOTE: Only registry is shared - it's read-only after initialization.
+    # ClickHouseConnector and MetricsLoader are created per-thread because
+    # clickhouse-connect doesn't support concurrent queries on the same client.
     try:
-        db = ClickHouseConnector(config=config.clickhouse)
         registry = MetricsRegistry()
-        loader = MetricsLoader(db=db, registry=registry)
-    except ConnectionError as e:
-        print(f"ERROR: Failed to connect to database: {e}", file=sys.stderr)
-        sys.exit(1)
     except Exception as e:
-        print(f"ERROR: Failed to initialize dependencies: {e}", file=sys.stderr)
+        print(f"ERROR: Failed to initialize metrics registry: {e}", file=sys.stderr)
         sys.exit(1)
 
     out_root = Path(args.out_dir)
@@ -107,10 +104,15 @@ def main():
         Returns: (metric_name, html_path_or_none, error_message_or_none)
         """
         # Create a new pipeline instance for this metric
-        # - Shared: registry, loader (thread-safe, read-only operations)
-        # - Per-pipeline: analyzer (each gets its own OpenAI client)
-        # - Per-pipeline: data_fetcher, context_builder (use shared deps)
+        # - Shared: config (immutable), registry (read-only after init)
+        # - Per-thread: db, loader (clickhouse-connect requires separate clients per thread)
+        # - Per-thread: analyzer (each gets its own OpenAI client)
         try:
+            # Create per-thread database connection
+            # clickhouse-connect doesn't support concurrent queries on the same client
+            db = ClickHouseConnector(config=config.clickhouse)
+            loader = MetricsLoader(db=db, registry=registry)
+            
             analyzer = OpenAIAnalyzer(api_key=api_key, model_name=openai_model_name)
             data_fetcher = DataFetcher(registry=registry, loader=loader)
             context_builder = ContextBuilder(config=config)
@@ -119,6 +121,8 @@ def main():
                 data_fetcher=data_fetcher,
                 context_builder=context_builder,
             )
+        except ConnectionError as e:
+            return (metric_name, None, f"Database connection failed: {e}")
         except Exception as e:
             return (metric_name, None, f"Failed to initialize pipeline: {e}")
         
