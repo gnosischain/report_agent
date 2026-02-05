@@ -11,8 +11,9 @@ import logging
 import os
 import shutil
 import tempfile
+import warnings
 from pathlib import Path
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import httpx
 from openai import OpenAI
@@ -21,7 +22,9 @@ from report_agent.dbt_context.from_docs_json import (
     build_model_catalog,
     save_catalog_to_file,
 )
-from report_agent.utils.config_loader import load_configs
+
+if TYPE_CHECKING:
+    from report_agent.config import AppConfig
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +33,7 @@ def generate_cross_metric_analysis(
     metric_findings: Dict[str, dict],  # metric_name -> {narrative, structured, validation_status}
     metric_data_files: Dict[str, str],  # metric_name -> path to CSV
     out_dir: str = "reports",
+    config: Optional[AppConfig] = None,
 ) -> dict:
     """
     Perform cross-metric correlation analysis.
@@ -45,10 +49,21 @@ def generate_cross_metric_analysis(
         metric_findings: Dict mapping metric names to their analysis results
         metric_data_files: Dict mapping metric names to CSV file paths
         out_dir: Output directory for saving results
+        config: AppConfig instance (if not provided, will use get_config())
         
     Returns:
         Dict with cross-metric insights
     """
+    # Get config if not provided
+    if config is None:
+        warnings.warn(
+            "generate_cross_metric_analysis() without config is deprecated. "
+            "Pass config explicitly: generate_cross_metric_analysis(..., config=config)",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from report_agent.config import get_config
+        config = get_config()
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
     
@@ -80,10 +95,10 @@ def generate_cross_metric_analysis(
             return {}
         
         # 3. Build catalog
-        cfg = load_configs()
+        cfg_dict = config.to_dict()
         catalog = {}
         try:
-            catalog = build_model_catalog(cfg)
+            catalog = build_model_catalog(cfg_dict)
         except Exception as e:
             log.warning(f"Could not build model catalog: {e}")
         
@@ -98,7 +113,7 @@ def generate_cross_metric_analysis(
         # 5. Upload files to OpenAI
         # Disable retries to save credits
         client = OpenAI(
-            api_key=cfg["llm"]["api_key"],
+            api_key=config.llm.api_key,
             max_retries=0,  # Disable retries
             http_client=httpx.Client(
                 timeout=httpx.Timeout(300.0, connect=10.0),  # 5 min total, 10s connect
@@ -123,7 +138,7 @@ def generate_cross_metric_analysis(
                 file_ids.append(client.files.create(file=f, purpose="assistants").id)
         
         # 6. Run analysis with Code Interpreter
-        model_name = cfg["llm"]["model"]
+        model_name = config.llm.model
         try:
             resp = client.responses.create(
                 model=model_name,

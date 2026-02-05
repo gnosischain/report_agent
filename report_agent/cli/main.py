@@ -208,6 +208,7 @@ def main():
                 metric_findings=structured_findings,
                 metric_data_files=metric_data_files,
                 out_dir=str(out_root),
+                config=config,
             )
             print(f"  ✓ Cross-metric insights saved")
         except Exception as e:
@@ -221,6 +222,7 @@ def main():
             summary_path = generate_weekly_report(
                 metric_reports=per_metric_html,
                 out_dir=str(out_root),
+                config=config,
             )
             print(f"  ✓ Weekly report HTML saved to: {summary_path} (main entry point)")
         except Exception as e:

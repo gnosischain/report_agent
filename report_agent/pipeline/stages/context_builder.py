@@ -117,6 +117,7 @@ class ContextBuilder:
                 has_catalog=catalog_path is not None,
                 pre_fetched_models={},  # Not used for per-metric reports
                 catalog=catalog if catalog_path else None,
+                config=self._config,
             )
             
             log.debug(f"Built context for model '{model}' in {tmpdir}")
