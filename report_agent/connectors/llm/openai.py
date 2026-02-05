@@ -1,10 +1,24 @@
 # report_agent/connectors/llm/openai.py
+"""
+DEPRECATED: This module is deprecated in favor of the pipeline architecture.
+
+Use report_agent.pipeline instead:
+    from report_agent.pipeline import ReportPipeline
+    from report_agent.pipeline.stages import OpenAIAnalyzer
+    
+    analyzer = OpenAIAnalyzer(api_key="...", model_name="gpt-4.1")
+    pipeline = ReportPipeline(llm_analyzer=analyzer)
+    result = pipeline.run("api_p2p_discv4_clients_daily")
+
+This module is kept for backward compatibility but will be removed in a future version.
+"""
 from __future__ import annotations
 
 import json
 import logging
 import os
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -30,7 +44,15 @@ from report_agent.utils.config_loader import load_configs
 
 class OpenAICodeInterpreterConnector(LLMConnector):
     """
-    OpenAI Responses API + Code Interpreter connector.
+    DEPRECATED: OpenAI Responses API + Code Interpreter connector.
+    
+    This class is deprecated. Use the pipeline architecture instead:
+        from report_agent.pipeline import ReportPipeline
+        from report_agent.pipeline.stages import OpenAIAnalyzer
+        
+        analyzer = OpenAIAnalyzer(api_key="...", model_name="gpt-4.1")
+        pipeline = ReportPipeline(llm_analyzer=analyzer)
+        result = pipeline.run("api_p2p_discv4_clients_daily")
 
     Responsibilities:
       - Fetch raw data for a dbt/ClickHouse model
@@ -41,6 +63,12 @@ class OpenAICodeInterpreterConnector(LLMConnector):
     """
 
     def __init__(self, api_key: str, model_name: str = "gpt-4.1"):
+        warnings.warn(
+            "OpenAICodeInterpreterConnector is deprecated. "
+            "Use report_agent.pipeline.ReportPipeline with OpenAIAnalyzer instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         super().__init__(api_key, model_name)
         # Disable automatic retries to save credits
         self.client = OpenAI(

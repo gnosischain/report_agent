@@ -8,7 +8,9 @@ from typing import Optional, Tuple
 
 import json
 
-from report_agent.connectors.llm.openai import OpenAICodeInterpreterConnector
+from report_agent.pipeline import ReportPipeline
+from report_agent.pipeline.stages import OpenAIAnalyzer
+from report_agent.pipeline.exceptions import PipelineError
 from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.nlg.cross_metric_service import generate_cross_metric_analysis
 from report_agent.nlg.report_service import generate_html_report
@@ -94,23 +96,25 @@ def main():
 
     def process_single_metric(metric_name: str) -> Tuple[str, Optional[Path], Optional[str]]:
         """
-        Process a single metric report.
+        Process a single metric report using the pipeline architecture.
         Returns: (metric_name, html_path_or_none, error_message_or_none)
         """
-        # Create a new connector instance for this metric to avoid artifact conflicts
-        # Use openai_model_name (not metric_name) to avoid confusion
+        # Create a new pipeline instance for this metric to avoid state conflicts
         try:
-            metric_connector = OpenAICodeInterpreterConnector(api_key=api_key, model_name=openai_model_name)
+            analyzer = OpenAIAnalyzer(api_key=api_key, model_name=openai_model_name)
+            pipeline = ReportPipeline(llm_analyzer=analyzer)
         except Exception as e:
-            return (metric_name, None, f"Failed to initialize connector: {e}")
+            return (metric_name, None, f"Failed to initialize pipeline: {e}")
         
         try:
             html_path = generate_html_report(
                 model=metric_name,
-                connector=metric_connector,
+                pipeline=pipeline,
                 out_dir=str(out_root),
             )
             return (metric_name, Path(html_path), None)
+        except PipelineError as e:
+            return (metric_name, None, str(e))
         except Exception as e:
             return (metric_name, None, str(e))
 
