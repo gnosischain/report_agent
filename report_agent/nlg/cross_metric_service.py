@@ -22,6 +22,7 @@ from report_agent.dbt_context.from_docs_json import (
     build_model_catalog,
     save_catalog_to_file,
 )
+from report_agent.utils.cost_tracker import get_cost_tracker
 
 if TYPE_CHECKING:
     from report_agent.config import AppConfig
@@ -155,6 +156,17 @@ def generate_cross_metric_analysis(
                 input=prompt,
                 temperature=0.2,
             )
+            
+            # Track API usage/cost
+            usage = getattr(resp, "usage", None)
+            if usage:
+                tracker = get_cost_tracker()
+                tracker.record_usage(
+                    category="cross_metric",
+                    model=model_name,
+                    input_tokens=getattr(usage, "input_tokens", 0) or 0,
+                    output_tokens=getattr(usage, "output_tokens", 0) or 0,
+                )
             
             analysis_text = getattr(resp, "output_text", None) or str(resp)
             

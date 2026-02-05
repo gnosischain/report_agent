@@ -19,6 +19,7 @@ from report_agent.pipeline.exceptions import PipelineError
 from report_agent.nlg.cross_metric_service import generate_cross_metric_analysis
 from report_agent.nlg.report_service import generate_html_report
 from report_agent.nlg.summary_service import generate_weekly_report
+from report_agent.utils.cost_tracker import get_cost_tracker, reset_cost_tracker
 
 
 def main():
@@ -51,6 +52,9 @@ def main():
     except Exception as e:
         print(f"ERROR: Failed to load configuration: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # Reset cost tracker for this run
+    reset_cost_tracker()
 
     # Extract LLM settings from typed config
     api_key = config.llm.api_key
@@ -228,7 +232,11 @@ def main():
         except Exception as e:
             print(f"  ✗ Failed to generate weekly report: {e}", file=sys.stderr)
 
-    # Print summary
+    # Print cost summary
+    tracker = get_cost_tracker()
+    tracker.print_summary()
+
+    # Print completion summary
     print("\n" + "=" * 60)
     print(f"Completed: {len(per_metric_html)} successful, {len(failed_metrics)} failed")
     if failed_metrics:

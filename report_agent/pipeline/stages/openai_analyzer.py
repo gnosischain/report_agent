@@ -20,6 +20,7 @@ from openai import OpenAI
 from report_agent.pipeline.models import AnalysisContext, RawAnalysis
 from report_agent.pipeline.stages.llm_analyzer import LLMAnalyzer
 from report_agent.pipeline.exceptions import AnalysisError
+from report_agent.utils.cost_tracker import get_cost_tracker
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,24 @@ class OpenAIAnalyzer(LLMAnalyzer):
         )
         
         self._last_artifacts: Optional[dict] = None
+    
+    def _record_usage(self, resp, metric_name: str) -> None:
+        """Record API usage to cost tracker."""
+        usage = getattr(resp, "usage", None)
+        if usage:
+            input_tokens = getattr(usage, "input_tokens", 0) or 0
+            output_tokens = getattr(usage, "output_tokens", 0) or 0
+            
+            tracker = get_cost_tracker()
+            tracker.record_usage(
+                category="per_metric",
+                model=self.model_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                metric_name=metric_name,
+            )
+        else:
+            log.debug(f"No usage data in response for {metric_name}")
     
     def analyze(self, context: AnalysisContext) -> RawAnalysis:
         """
@@ -106,6 +125,9 @@ class OpenAIAnalyzer(LLMAnalyzer):
             error_msg = str(e)
             log.error(f"API call failed for {model}: {error_msg}")
             raise AnalysisError(f"API call failed: {error_msg}", model)
+        
+        # Track API usage/cost
+        self._record_usage(resp, model)
         
         # Extract artifacts
         try:

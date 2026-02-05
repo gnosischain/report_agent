@@ -19,6 +19,7 @@ from report_agent.dbt_context.from_docs_json import (
     get_column_metadata,
 )
 from report_agent.metrics.metrics_registry import MetricsRegistry
+from report_agent.utils.cost_tracker import get_cost_tracker
 
 if TYPE_CHECKING:
     from report_agent.config import AppConfig
@@ -377,6 +378,17 @@ def generate_weekly_report(
         ],
         temperature=0.3,
     )
+    
+    # Track API usage/cost
+    if resp.usage:
+        tracker = get_cost_tracker()
+        tracker.record_usage(
+            category="summary",
+            model=model_name,
+            input_tokens=resp.usage.prompt_tokens or 0,
+            output_tokens=resp.usage.completion_tokens or 0,
+        )
+    
     full_output = resp.choices[0].message.content or ""
 
     highlighted = _parse_highlighted_metrics(full_output)
