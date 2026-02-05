@@ -10,14 +10,17 @@ from __future__ import annotations
 
 import logging
 import shutil
-from typing import Optional
+import warnings
+from typing import TYPE_CHECKING, Optional
 
 from report_agent.pipeline.models import MetricData, AnalysisContext, ValidatedResult
-from report_agent.pipeline.stages.data_fetcher import DataFetcher
-from report_agent.pipeline.stages.context_builder import ContextBuilder
 from report_agent.pipeline.stages.llm_analyzer import LLMAnalyzer
 from report_agent.pipeline.stages.validator import ResultValidator
 from report_agent.pipeline.exceptions import PipelineError
+
+if TYPE_CHECKING:
+    from report_agent.pipeline.stages.data_fetcher import DataFetcher
+    from report_agent.pipeline.stages.context_builder import ContextBuilder
 
 log = logging.getLogger(__name__)
 
@@ -32,26 +35,70 @@ class ReportPipeline:
     3. LLMAnalyzer: Run LLM analysis
     4. ResultValidator: Validate the results
     
-    Usage:
+    Args:
+        llm_analyzer: An instance of LLMAnalyzer (e.g., OpenAIAnalyzer) - required.
+        data_fetcher: DataFetcher instance (optional, created if not provided).
+        context_builder: ContextBuilder instance (optional, created if not provided).
+        validator: ResultValidator instance (optional, created if not provided).
+    
+    Usage (recommended - full DI):
+        from report_agent.config import get_config
         from report_agent.pipeline import ReportPipeline
-        from report_agent.pipeline.stages import OpenAIAnalyzer
+        from report_agent.pipeline.stages import OpenAIAnalyzer, DataFetcher, ContextBuilder
         
+        config = get_config()
+        pipeline = ReportPipeline(
+            llm_analyzer=OpenAIAnalyzer(api_key=config.llm.api_key),
+            data_fetcher=DataFetcher(registry=registry, loader=loader),
+            context_builder=ContextBuilder(config=config),
+        )
+        result = pipeline.run("api_p2p_discv4_clients_daily")
+    
+    Usage (simple - auto-creates stages):
         analyzer = OpenAIAnalyzer(api_key="...", model_name="gpt-4.1")
         pipeline = ReportPipeline(llm_analyzer=analyzer)
         result = pipeline.run("api_p2p_discv4_clients_daily")
     """
     
-    def __init__(self, llm_analyzer: LLMAnalyzer):
+    def __init__(
+        self,
+        llm_analyzer: LLMAnalyzer,
+        data_fetcher: Optional[DataFetcher] = None,
+        context_builder: Optional[ContextBuilder] = None,
+        validator: Optional[ResultValidator] = None,
+    ):
         """
-        Initialize the pipeline with an LLM analyzer.
+        Initialize the pipeline with stages.
         
         Args:
-            llm_analyzer: An instance of LLMAnalyzer (e.g., OpenAIAnalyzer)
+            llm_analyzer: An instance of LLMAnalyzer (e.g., OpenAIAnalyzer) - required.
+            data_fetcher: DataFetcher instance (optional).
+            context_builder: ContextBuilder instance (optional).
+            validator: ResultValidator instance (optional).
         """
-        self.data_fetcher = DataFetcher()
-        self.context_builder = ContextBuilder()
+        # LLM analyzer is always required
         self.llm_analyzer = llm_analyzer
-        self.validator = ResultValidator()
+        
+        # Other stages can be injected or auto-created
+        if data_fetcher is None or context_builder is None:
+            # Only warn if user is relying on auto-creation (for cleaner logs)
+            if data_fetcher is None and context_builder is None:
+                log.debug("Auto-creating DataFetcher and ContextBuilder (consider injecting for better testability)")
+        
+        if data_fetcher is None:
+            from report_agent.pipeline.stages.data_fetcher import DataFetcher
+            data_fetcher = DataFetcher()
+        
+        if context_builder is None:
+            from report_agent.pipeline.stages.context_builder import ContextBuilder
+            context_builder = ContextBuilder()
+        
+        if validator is None:
+            validator = ResultValidator()
+        
+        self.data_fetcher = data_fetcher
+        self.context_builder = context_builder
+        self.validator = validator
         
         # Keep reference to last context for artifact downloads
         self._last_context: Optional[AnalysisContext] = None

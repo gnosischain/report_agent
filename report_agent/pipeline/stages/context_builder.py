@@ -12,8 +12,9 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
+import warnings
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import pandas as pd
 
@@ -27,7 +28,9 @@ from report_agent.dbt_context.from_docs_json import (
 from report_agent.nlg.prompt_builder import build_ci_prompt
 from report_agent.pipeline.models import MetricData, AnalysisContext
 from report_agent.pipeline.exceptions import ContextBuildError
-from report_agent.utils.config_loader import load_configs
+
+if TYPE_CHECKING:
+    from report_agent.config import AppConfig
 
 log = logging.getLogger(__name__)
 
@@ -36,13 +39,31 @@ class ContextBuilder:
     """
     Builds all context files and prompts for LLM analysis.
     
+    Args:
+        config: AppConfig instance with application configuration.
+        
+    If not provided, loads from environment (deprecated behavior).
+    
     Usage:
-        builder = ContextBuilder()
+        builder = ContextBuilder(config=config)
         context = builder.build(metric_data)
     """
     
-    def __init__(self):
-        self.cfg = load_configs()
+    def __init__(self, config: Optional[AppConfig] = None):
+        # Support legacy usage without config
+        if config is None:
+            warnings.warn(
+                "ContextBuilder() without config is deprecated. "
+                "Pass config explicitly: ContextBuilder(config=config)",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            from report_agent.config import get_config
+            config = get_config()
+        
+        self._config = config
+        # Convert to dict for backward compatibility with dbt_context functions
+        self.cfg = config.to_dict()
     
     def build(self, data: MetricData) -> AnalysisContext:
         """

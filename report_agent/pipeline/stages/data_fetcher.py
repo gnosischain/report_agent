@@ -10,12 +10,15 @@ This is the first stage of the pipeline, responsible for:
 from __future__ import annotations
 
 import logging
-from typing import Optional
+import warnings
+from typing import TYPE_CHECKING, Optional
 
-from report_agent.metrics.metrics_loader import MetricsLoader
-from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.pipeline.models import MetricData
 from report_agent.pipeline.exceptions import DataFetchError
+
+if TYPE_CHECKING:
+    from report_agent.metrics.metrics_loader import MetricsLoader
+    from report_agent.metrics.metrics_registry import MetricsRegistry
 
 log = logging.getLogger(__name__)
 
@@ -24,14 +27,41 @@ class DataFetcher:
     """
     Fetches raw data for a metric from ClickHouse.
     
+    Args:
+        registry: MetricsRegistry instance for metric metadata.
+        loader: MetricsLoader instance for data fetching.
+        
+    If not provided, creates instances internally (deprecated behavior).
+    
     Usage:
-        fetcher = DataFetcher()
+        fetcher = DataFetcher(registry=registry, loader=loader)
         data = fetcher.fetch("api_p2p_discv4_clients_daily")
     """
     
-    def __init__(self):
-        self.registry = MetricsRegistry()
-        self.loader = MetricsLoader()
+    def __init__(
+        self,
+        registry: Optional[MetricsRegistry] = None,
+        loader: Optional[MetricsLoader] = None,
+    ):
+        # Support legacy usage without injected dependencies
+        if registry is None or loader is None:
+            warnings.warn(
+                "DataFetcher() without registry/loader is deprecated. "
+                "Pass dependencies explicitly: DataFetcher(registry=registry, loader=loader)",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Lazy import to avoid circular imports
+            from report_agent.metrics.metrics_loader import MetricsLoader
+            from report_agent.metrics.metrics_registry import MetricsRegistry
+            
+            if registry is None:
+                registry = MetricsRegistry()
+            if loader is None:
+                loader = MetricsLoader()
+        
+        self.registry = registry
+        self.loader = loader
     
     def fetch(self, model_name: str, lookback_days: Optional[int] = None) -> MetricData:
         """

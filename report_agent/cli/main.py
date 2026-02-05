@@ -8,10 +8,14 @@ from typing import Optional, Tuple
 import json
 
 from report_agent.config import get_config, AppConfig
+from report_agent.connectors.db.clickhouse_connector import ClickHouseConnector
+from report_agent.metrics.metrics_loader import MetricsLoader
+from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.pipeline import ReportPipeline
 from report_agent.pipeline.stages import OpenAIAnalyzer
+from report_agent.pipeline.stages.data_fetcher import DataFetcher
+from report_agent.pipeline.stages.context_builder import ContextBuilder
 from report_agent.pipeline.exceptions import PipelineError
-from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.nlg.cross_metric_service import generate_cross_metric_analysis
 from report_agent.nlg.report_service import generate_html_report
 from report_agent.nlg.summary_service import generate_weekly_report
@@ -52,10 +56,17 @@ def main():
     api_key = config.llm.api_key
     openai_model_name = config.llm.model
 
+    # Initialize shared dependencies (composition root)
+    # These are created once and shared across all pipeline instances
     try:
+        db = ClickHouseConnector(config=config.clickhouse)
         registry = MetricsRegistry()
+        loader = MetricsLoader(db=db, registry=registry)
+    except ConnectionError as e:
+        print(f"ERROR: Failed to connect to database: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
-        print(f"ERROR: Failed to load metrics registry: {e}", file=sys.stderr)
+        print(f"ERROR: Failed to initialize dependencies: {e}", file=sys.stderr)
         sys.exit(1)
 
     out_root = Path(args.out_dir)
@@ -95,10 +106,19 @@ def main():
         Process a single metric report using the pipeline architecture.
         Returns: (metric_name, html_path_or_none, error_message_or_none)
         """
-        # Create a new pipeline instance for this metric to avoid state conflicts
+        # Create a new pipeline instance for this metric
+        # - Shared: registry, loader (thread-safe, read-only operations)
+        # - Per-pipeline: analyzer (each gets its own OpenAI client)
+        # - Per-pipeline: data_fetcher, context_builder (use shared deps)
         try:
             analyzer = OpenAIAnalyzer(api_key=api_key, model_name=openai_model_name)
-            pipeline = ReportPipeline(llm_analyzer=analyzer)
+            data_fetcher = DataFetcher(registry=registry, loader=loader)
+            context_builder = ContextBuilder(config=config)
+            pipeline = ReportPipeline(
+                llm_analyzer=analyzer,
+                data_fetcher=data_fetcher,
+                context_builder=context_builder,
+            )
         except Exception as e:
             return (metric_name, None, f"Failed to initialize pipeline: {e}")
         

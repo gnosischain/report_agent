@@ -1,19 +1,24 @@
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING, Optional
+
 import clickhouse_connect
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError, ProgrammingError
 import pandas as pd
 
-from report_agent.utils.config_loader import load_configs
+if TYPE_CHECKING:
+    from report_agent.config import ClickHouseConfig
 
 log = logging.getLogger(__name__)
 
 
-def create_clickhouse_client(config: dict, database: str):
+def create_clickhouse_client(config: ClickHouseConfig, database: str):
     """
     Create a ClickHouse client from configuration.
     
     Args:
-        config: Dictionary with connection parameters (host, user, password, secure, verify, port)
+        config: ClickHouseConfig with connection parameters
         database: Database name to connect to
     
     Returns:
@@ -23,16 +28,16 @@ def create_clickhouse_client(config: dict, database: str):
         ConnectionError: If connection fails
     """
     common = dict(
-        host=config["host"],
-        username=config["user"],
-        password=config["password"],
-        secure=config.get("secure", True),
-        verify=config.get("verify", True),
+        host=config.host,
+        username=config.user,
+        password=config.password,
+        secure=config.secure,
+        verify=config.verify,
     )
     # Port is optional; clickhouse-connect uses default ports if not provided
     # (8123 for HTTP, 9440 for HTTPS)
-    if config.get("port"):
-        common["port"] = int(config["port"])
+    if config.port:
+        common["port"] = config.port
     
     try:
         return clickhouse_connect.get_client(
@@ -47,22 +52,42 @@ def create_clickhouse_client(config: dict, database: str):
 
 
 class ClickHouseConnector:
-    def __init__(self):
-        cfg = load_configs()["clickhouse"]
+    """
+    ClickHouse database connector with separate read and write clients.
+    
+    Args:
+        config: ClickHouseConfig with connection parameters.
+                If not provided, loads from environment (deprecated behavior).
+    """
+    
+    def __init__(self, config: Optional[ClickHouseConfig] = None):
+        # Support legacy usage without config (with deprecation warning)
+        if config is None:
+            import warnings
+            from report_agent.config import get_config
+            warnings.warn(
+                "ClickHouseConnector() without config is deprecated. "
+                "Pass config explicitly: ClickHouseConnector(config.clickhouse)",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            config = get_config().clickhouse
+        
+        self._config = config
         
         # Initialize read and write clients using shared connection utility
         try:
-            self.read = create_clickhouse_client(cfg, cfg["db_read"])
+            self.read = create_clickhouse_client(config, config.db_read)
         except ConnectionError as e:
             raise ConnectionError(
-                f"Failed to connect to ClickHouse (read database '{cfg['db_read']}'): {e}"
+                f"Failed to connect to ClickHouse (read database '{config.db_read}'): {e}"
             ) from e
         
         try:
-            self.write = create_clickhouse_client(cfg, cfg["db_write"])
+            self.write = create_clickhouse_client(config, config.db_write)
         except ConnectionError as e:
             raise ConnectionError(
-                f"Failed to connect to ClickHouse (write database '{cfg['db_write']}'): {e}"
+                f"Failed to connect to ClickHouse (write database '{config.db_write}'): {e}"
             ) from e
 
     def _ensure_read_only(self, sql: str):
