@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -8,6 +7,7 @@ from typing import Optional, Tuple
 
 import json
 
+from report_agent.config import get_config, AppConfig
 from report_agent.pipeline import ReportPipeline
 from report_agent.pipeline.stages import OpenAIAnalyzer
 from report_agent.pipeline.exceptions import PipelineError
@@ -15,7 +15,6 @@ from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.nlg.cross_metric_service import generate_cross_metric_analysis
 from report_agent.nlg.report_service import generate_html_report
 from report_agent.nlg.summary_service import generate_weekly_report
-from report_agent.utils.config_loader import load_configs, validate_config
 
 
 def main():
@@ -40,8 +39,8 @@ def main():
 
     # Load and validate configuration early
     try:
-        cfg = load_configs()
-        validate_config(cfg, require_llm=True, require_db=True)
+        config = get_config()
+        config.validate(require_llm=True, require_db=True)
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
@@ -49,12 +48,9 @@ def main():
         print(f"ERROR: Failed to load configuration: {e}", file=sys.stderr)
         sys.exit(1)
 
-    api_key = os.getenv("OPENAI_API_KEY") or cfg["llm"]["api_key"]
-    openai_model_name = cfg["llm"]["model"]  # OpenAI model name (e.g., "gpt-4.1")
-
-    if not api_key:
-        print("ERROR: OPENAI_API_KEY not found. Please set it in your .env file or environment.", file=sys.stderr)
-        sys.exit(1)
+    # Extract LLM settings from typed config
+    api_key = config.llm.api_key
+    openai_model_name = config.llm.model
 
     try:
         registry = MetricsRegistry()

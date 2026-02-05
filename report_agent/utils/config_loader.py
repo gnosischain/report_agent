@@ -1,4 +1,20 @@
+"""
+DEPRECATED: This module is deprecated in favor of report_agent.config.
+
+Use the new typed configuration instead:
+    from report_agent.config import get_config, AppConfig
+    
+    config = get_config()
+    config.validate(require_llm=True, require_db=True)
+    
+    # Access typed config
+    host = config.clickhouse.host
+    api_key = config.llm.api_key
+
+This module is kept for backward compatibility but will be removed in a future version.
+"""
 import os
+import warnings
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -8,11 +24,18 @@ load_dotenv()
 
 def load_configs() -> dict:
     """
+    DEPRECATED: Use report_agent.config.get_config() instead.
+    
     Loads:
       • ClickHouse connection (read/write DBs)
       • LLM settings (provider, model, API keys)
       • dbt docs location (URL or local manifest path)
     """
+    warnings.warn(
+        "load_configs() is deprecated. Use report_agent.config.get_config() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     pkg_root = Path(__file__).resolve().parent.parent
 
     clickhouse = {
@@ -48,6 +71,8 @@ def load_configs() -> dict:
 
 def validate_config(cfg: dict, require_llm: bool = True, require_db: bool = True) -> None:
     """
+    DEPRECATED: Use AppConfig.validate() instead.
+    
     Validate that required configuration values are present.
     
     Args:
@@ -58,6 +83,11 @@ def validate_config(cfg: dict, require_llm: bool = True, require_db: bool = True
     Raises:
         ValueError: If required configuration is missing
     """
+    warnings.warn(
+        "validate_config() is deprecated. Use AppConfig.validate() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     errors = []
     
     if require_llm:
