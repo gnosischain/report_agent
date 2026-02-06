@@ -269,6 +269,10 @@ def _render_summary_page(
     Render the final weekly report HTML page, including links to per-metric reports
     and embedding plots for highlighted metrics.
     """
+    # Ensure shared CSS is present in output directory
+    from report_agent.nlg.html_report import ensure_static_assets
+    ensure_static_assets(out_path.parent)
+    
     tpl = _env.get_template("summary_page.html.j2")
 
     # Get display names for all metrics

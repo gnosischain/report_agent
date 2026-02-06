@@ -1,4 +1,6 @@
+import logging
 import os
+import shutil
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +16,10 @@ try:
 except Exception:
     _MD_ENABLED = False
 
+log = logging.getLogger(__name__)
+
 template_dir = files("report_agent.nlg") / "templates"
+_static_dir = Path(str(template_dir)) / "static"
 
 _env = Environment(
     loader=FileSystemLoader(str(template_dir)),
@@ -28,6 +33,23 @@ def _md_to_html(text: str) -> str:
         return _md.markdown(text, extensions=["extra", "tables", "fenced_code"])
     import html as _html
     return f"<pre>{_html.escape(text)}</pre>"
+
+def ensure_static_assets(out_dir: Path) -> None:
+    """
+    Copy shared static assets (CSS, etc.) into the output directory.
+    
+    Creates ``out_dir/css/report.css`` from the bundled template static files.
+    Safe to call multiple times; overwrites existing files to stay up-to-date.
+    """
+    css_src = _static_dir / "report.css"
+    if not css_src.exists():
+        log.warning(f"Static CSS not found at {css_src}")
+        return
+    
+    css_dst_dir = Path(out_dir) / "css"
+    css_dst_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(css_src), str(css_dst_dir / "report.css"))
+
 
 def _to_posix_relpath(p: Path, start: Path) -> str:
     """
@@ -57,6 +79,9 @@ def render_html_report(
     """
     out_dir_p = Path(out_dir).resolve()
     out_dir_p.mkdir(parents=True, exist_ok=True)
+
+    # Ensure shared CSS is present in output directory
+    ensure_static_assets(out_dir_p)
 
     narrative_html = _md_to_html(narrative_markdown)
 
@@ -116,6 +141,9 @@ def generate_index_page(
     """
     out_dir_p = Path(out_dir).resolve()
     out_dir_p.mkdir(parents=True, exist_ok=True)
+    
+    # Ensure shared CSS is present in output directory
+    ensure_static_assets(out_dir_p)
     
     # Scan for HTML report files (excluding index.html)
     report_files: List[Tuple[str, str, datetime]] = []
