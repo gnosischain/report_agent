@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import json
 import shutil
-import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from importlib.resources import files
 from jinja2 import Environment, FileSystemLoader
 from openai import OpenAI
 import markdown
 
+from report_agent.config import AppConfig
 from report_agent.dbt_context.from_docs_json import (
     load_manifest,
     get_model_node,
@@ -20,9 +20,6 @@ from report_agent.dbt_context.from_docs_json import (
 )
 from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.utils.cost_tracker import get_cost_tracker
-
-if TYPE_CHECKING:
-    from report_agent.config import AppConfig
 
 _template_dir = files("report_agent.nlg") / "templates"
 _env = Environment(loader=FileSystemLoader(str(_template_dir)), autoescape=True)
@@ -115,21 +112,11 @@ def _filter_low_confidence_findings(
 
 def _load_metric_docs(
     metric_names: List[str],
-    config: Optional[AppConfig] = None,
+    config: AppConfig,
 ) -> Dict[str, MetricDoc]:
     """
     Use dbt manifest helpers to get model + column docs for each metric.
     """
-    if config is None:
-        warnings.warn(
-            "_load_metric_docs() without config is deprecated. "
-            "Pass config explicitly.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        from report_agent.config import get_config
-        config = get_config()
-    
     cfg_dict = config.to_dict()
     manifest = load_manifest(cfg_dict)
 
@@ -309,28 +296,18 @@ def _render_summary_page(
 
 def generate_weekly_report(
     metric_reports: List[Tuple[str, Path]],
+    config: AppConfig,
     out_dir: str = "reports",
-    config: Optional[AppConfig] = None,
 ) -> Path:
     """
     Generate a unified weekly report that synthesizes analytical findings across all metrics.
 
     metric_reports: list of (metric_name, html_path) for per-metric reports
+    config: AppConfig instance
     out_dir: base reports directory (same used for HTML + plots + text)
-    config: AppConfig instance (if not provided, will use get_config())
 
     Returns the path to the weekly report HTML (saved as index.html).
     """
-    # Get config if not provided
-    if config is None:
-        warnings.warn(
-            "generate_weekly_report() without config is deprecated. "
-            "Pass config explicitly: generate_weekly_report(..., config=config)",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        from report_agent.config import get_config
-        config = get_config()
     out_root = Path(out_dir)
     out_root.mkdir(parents=True, exist_ok=True)
 

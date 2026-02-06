@@ -34,12 +34,11 @@ report_agent/
   cli/
     main.py                       # CLI entrypoint (installed as `report-agent`)
 
+  config.py                       # centralized typed configuration (AppConfig)
+
   connectors/
     db/
       clickhouse_connector.py     # read-only ClickHouse client
-    llm/
-      base.py                     # abstract LLMConnector
-      openai.py                   # OpenAICodeInterpreterConnector (Responses API + CI)
 
   metrics/
     metrics.yml                   # metric list + kind + history_days
@@ -61,9 +60,22 @@ report_agent/
       report_page.html.j2         # per-metric HTML template (dark theme)
       summary_prompt.j2           # weekly report LLM prompt
       summary_page.html.j2        # weekly report HTML template
+      static/
+        report.css                # shared stylesheet for all HTML reports
+
+  pipeline/
+    orchestrator.py               # ReportPipeline (coordinates all stages)
+    models.py                     # data models (MetricData, AnalysisContext, etc.)
+    exceptions.py                 # custom exceptions (PipelineError, etc.)
+    stages/
+      data_fetcher.py             # stage 1: fetch data from ClickHouse
+      context_builder.py          # stage 2: prepare files and prompts for LLM
+      llm_analyzer.py             # stage 3: abstract LLM analyzer interface
+      openai_analyzer.py          # stage 3: OpenAI Code Interpreter implementation
+      validator.py                # stage 4: validate LLM output against data
 
   utils/
-    config_loader.py              # loads .env and returns config dict
+    cost_tracker.py               # API usage tracking and cost estimation
 ```
 
 **Output structure after a run (default `reports/`):**
@@ -112,7 +124,7 @@ Dependencies (via `pyproject.toml`) include: `openai`, `clickhouse-connect`, `ji
 
 ## Configuration
 
-Set credentials in `.env` (loaded by `utils/config_loader.py`):
+Set credentials in `.env` (loaded by `config.py`):
 
 ```bash
 # OpenAI

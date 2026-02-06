@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
 
 import clickhouse_connect
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError, ProgrammingError
 import pandas as pd
 
-if TYPE_CHECKING:
-    from report_agent.config import ClickHouseConfig
+from report_agent.config import ClickHouseConfig
 
 log = logging.getLogger(__name__)
 
@@ -57,22 +55,9 @@ class ClickHouseConnector:
     
     Args:
         config: ClickHouseConfig with connection parameters.
-                If not provided, loads from environment (deprecated behavior).
     """
     
-    def __init__(self, config: Optional[ClickHouseConfig] = None):
-        # Support legacy usage without config (with deprecation warning)
-        if config is None:
-            import warnings
-            from report_agent.config import get_config
-            warnings.warn(
-                "ClickHouseConnector() without config is deprecated. "
-                "Pass config explicitly: ClickHouseConnector(config.clickhouse)",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            config = get_config().clickhouse
-        
+    def __init__(self, config: ClickHouseConfig):
         self._config = config
         
         # Initialize read and write clients using shared connection utility

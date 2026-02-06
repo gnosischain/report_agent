@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import warnings
-from typing import TYPE_CHECKING, Optional
-
-if TYPE_CHECKING:
-    from report_agent.connectors.db.clickhouse_connector import ClickHouseConnector
-    from report_agent.metrics.metrics_registry import MetricsRegistry
+from report_agent.connectors.db.clickhouse_connector import ClickHouseConnector
+from report_agent.metrics.metrics_registry import MetricsRegistry
 
 
 class MetricsLoader:
@@ -15,32 +11,9 @@ class MetricsLoader:
     Args:
         db: ClickHouseConnector instance for database access.
         registry: MetricsRegistry instance for metric metadata.
-        
-    If not provided, creates instances internally (deprecated behavior).
     """
     
-    def __init__(
-        self,
-        db: Optional[ClickHouseConnector] = None,
-        registry: Optional[MetricsRegistry] = None,
-    ):
-        # Support legacy usage without injected dependencies
-        if db is None or registry is None:
-            warnings.warn(
-                "MetricsLoader() without db/registry is deprecated. "
-                "Pass dependencies explicitly: MetricsLoader(db=db, registry=registry)",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            # Lazy import to avoid circular imports
-            from report_agent.connectors.db.clickhouse_connector import ClickHouseConnector
-            from report_agent.metrics.metrics_registry import MetricsRegistry
-            
-            if db is None:
-                db = ClickHouseConnector()
-            if registry is None:
-                registry = MetricsRegistry()
-        
+    def __init__(self, db: ClickHouseConnector, registry: MetricsRegistry):
         self.db = db
         self.registry = registry
 
