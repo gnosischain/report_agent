@@ -5,20 +5,21 @@ import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from importlib.resources import files
 from jinja2 import Environment, FileSystemLoader
 from openai import OpenAI
 import markdown
 
+from report_agent.config import AppConfig
 from report_agent.dbt_context.from_docs_json import (
     load_manifest,
     get_model_node,
     get_column_metadata,
 )
 from report_agent.metrics.metrics_registry import MetricsRegistry
-from report_agent.utils.config_loader import load_configs
+from report_agent.utils.cost_tracker import get_cost_tracker
 
 _template_dir = files("report_agent.nlg") / "templates"
 _env = Environment(loader=FileSystemLoader(str(_template_dir)), autoescape=True)
@@ -109,12 +110,15 @@ def _filter_low_confidence_findings(
     return filtered
 
 
-def _load_metric_docs(metric_names: List[str]) -> Dict[str, MetricDoc]:
+def _load_metric_docs(
+    metric_names: List[str],
+    config: AppConfig,
+) -> Dict[str, MetricDoc]:
     """
     Use dbt manifest helpers to get model + column docs for each metric.
     """
-    cfg = load_configs()
-    manifest = load_manifest(cfg)
+    cfg_dict = config.to_dict()
+    manifest = load_manifest(cfg_dict)
 
     metric_docs: Dict[str, MetricDoc] = {}
 
@@ -252,6 +256,10 @@ def _render_summary_page(
     Render the final weekly report HTML page, including links to per-metric reports
     and embedding plots for highlighted metrics.
     """
+    # Ensure shared CSS is present in output directory
+    from report_agent.nlg.html_report import ensure_static_assets
+    ensure_static_assets(out_path.parent)
+    
     tpl = _env.get_template("summary_page.html.j2")
 
     # Get display names for all metrics
@@ -288,12 +296,14 @@ def _render_summary_page(
 
 def generate_weekly_report(
     metric_reports: List[Tuple[str, Path]],
+    config: AppConfig,
     out_dir: str = "reports",
 ) -> Path:
     """
     Generate a unified weekly report that synthesizes analytical findings across all metrics.
 
     metric_reports: list of (metric_name, html_path) for per-metric reports
+    config: AppConfig instance
     out_dir: base reports directory (same used for HTML + plots + text)
 
     Returns the path to the weekly report HTML (saved as index.html).
@@ -328,7 +338,7 @@ def generate_weekly_report(
     }
     filtered_findings = _filter_low_confidence_findings(structured_findings, validation_results)
     
-    metric_docs = _load_metric_docs(list(metric_texts.keys()))
+    metric_docs = _load_metric_docs(list(metric_texts.keys()), config=config)
 
     prompt = _build_summary_prompt(
         metric_texts,
@@ -337,9 +347,8 @@ def generate_weekly_report(
         cross_metric_insights=cross_metric_insights,
     )
 
-    cfg = load_configs()
-    api_key = cfg["llm"]["api_key"]
-    model_name = cfg["llm"].get("summary_model") or cfg["llm"]["model"]
+    api_key = config.llm.api_key
+    model_name = config.llm.model
 
     client = OpenAI(api_key=api_key)
     resp = client.chat.completions.create(
@@ -350,6 +359,17 @@ def generate_weekly_report(
         ],
         temperature=0.3,
     )
+    
+    # Track API usage/cost
+    if resp.usage:
+        tracker = get_cost_tracker()
+        tracker.record_usage(
+            category="summary",
+            model=model_name,
+            input_tokens=resp.usage.prompt_tokens or 0,
+            output_tokens=resp.usage.completion_tokens or 0,
+        )
+    
     full_output = resp.choices[0].message.content or ""
 
     highlighted = _parse_highlighted_metrics(full_output)

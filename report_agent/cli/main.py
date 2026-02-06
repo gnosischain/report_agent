@@ -1,6 +1,5 @@
 import argparse
 import logging
-import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -8,12 +7,19 @@ from typing import Optional, Tuple
 
 import json
 
-from report_agent.connectors.llm.openai import OpenAICodeInterpreterConnector
+from report_agent.config import get_config, AppConfig
+from report_agent.connectors.db.clickhouse_connector import ClickHouseConnector
+from report_agent.metrics.metrics_loader import MetricsLoader
 from report_agent.metrics.metrics_registry import MetricsRegistry
+from report_agent.pipeline import ReportPipeline
+from report_agent.pipeline.stages import OpenAIAnalyzer
+from report_agent.pipeline.stages.data_fetcher import DataFetcher
+from report_agent.pipeline.stages.context_builder import ContextBuilder
+from report_agent.pipeline.exceptions import PipelineError
 from report_agent.nlg.cross_metric_service import generate_cross_metric_analysis
 from report_agent.nlg.report_service import generate_html_report
 from report_agent.nlg.summary_service import generate_weekly_report
-from report_agent.utils.config_loader import load_configs, validate_config
+from report_agent.utils.cost_tracker import get_cost_tracker, reset_cost_tracker
 
 
 def main():
@@ -38,8 +44,8 @@ def main():
 
     # Load and validate configuration early
     try:
-        cfg = load_configs()
-        validate_config(cfg, require_llm=True, require_db=True)
+        config = get_config()
+        config.validate(require_llm=True, require_db=True)
     except ValueError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         sys.exit(1)
@@ -47,17 +53,21 @@ def main():
         print(f"ERROR: Failed to load configuration: {e}", file=sys.stderr)
         sys.exit(1)
 
-    api_key = os.getenv("OPENAI_API_KEY") or cfg["llm"]["api_key"]
-    openai_model_name = cfg["llm"]["model"]  # OpenAI model name (e.g., "gpt-4.1")
+    # Reset cost tracker for this run
+    reset_cost_tracker()
 
-    if not api_key:
-        print("ERROR: OPENAI_API_KEY not found. Please set it in your .env file or environment.", file=sys.stderr)
-        sys.exit(1)
+    # Extract LLM settings from typed config
+    api_key = config.llm.api_key
+    openai_model_name = config.llm.model
 
+    # Initialize shared dependencies (composition root)
+    # NOTE: Only registry is shared - it's read-only after initialization.
+    # ClickHouseConnector and MetricsLoader are created per-thread because
+    # clickhouse-connect doesn't support concurrent queries on the same client.
     try:
         registry = MetricsRegistry()
     except Exception as e:
-        print(f"ERROR: Failed to load metrics registry: {e}", file=sys.stderr)
+        print(f"ERROR: Failed to initialize metrics registry: {e}", file=sys.stderr)
         sys.exit(1)
 
     out_root = Path(args.out_dir)
@@ -94,23 +104,41 @@ def main():
 
     def process_single_metric(metric_name: str) -> Tuple[str, Optional[Path], Optional[str]]:
         """
-        Process a single metric report.
+        Process a single metric report using the pipeline architecture.
         Returns: (metric_name, html_path_or_none, error_message_or_none)
         """
-        # Create a new connector instance for this metric to avoid artifact conflicts
-        # Use openai_model_name (not metric_name) to avoid confusion
+        # Create a new pipeline instance for this metric
+        # - Shared: config (immutable), registry (read-only after init)
+        # - Per-thread: db, loader (clickhouse-connect requires separate clients per thread)
+        # - Per-thread: analyzer (each gets its own OpenAI client)
         try:
-            metric_connector = OpenAICodeInterpreterConnector(api_key=api_key, model_name=openai_model_name)
+            # Create per-thread database connection
+            # clickhouse-connect doesn't support concurrent queries on the same client
+            db = ClickHouseConnector(config=config.clickhouse)
+            loader = MetricsLoader(db=db, registry=registry)
+            
+            analyzer = OpenAIAnalyzer(api_key=api_key, model_name=openai_model_name)
+            data_fetcher = DataFetcher(registry=registry, loader=loader)
+            context_builder = ContextBuilder(config=config)
+            pipeline = ReportPipeline(
+                llm_analyzer=analyzer,
+                data_fetcher=data_fetcher,
+                context_builder=context_builder,
+            )
+        except ConnectionError as e:
+            return (metric_name, None, f"Database connection failed: {e}")
         except Exception as e:
-            return (metric_name, None, f"Failed to initialize connector: {e}")
+            return (metric_name, None, f"Failed to initialize pipeline: {e}")
         
         try:
             html_path = generate_html_report(
                 model=metric_name,
-                connector=metric_connector,
+                pipeline=pipeline,
                 out_dir=str(out_root),
             )
             return (metric_name, Path(html_path), None)
+        except PipelineError as e:
+            return (metric_name, None, str(e))
         except Exception as e:
             return (metric_name, None, str(e))
 
@@ -184,6 +212,7 @@ def main():
                 metric_findings=structured_findings,
                 metric_data_files=metric_data_files,
                 out_dir=str(out_root),
+                config=config,
             )
             print(f"  ✓ Cross-metric insights saved")
         except Exception as e:
@@ -197,12 +226,17 @@ def main():
             summary_path = generate_weekly_report(
                 metric_reports=per_metric_html,
                 out_dir=str(out_root),
+                config=config,
             )
             print(f"  ✓ Weekly report HTML saved to: {summary_path} (main entry point)")
         except Exception as e:
             print(f"  ✗ Failed to generate weekly report: {e}", file=sys.stderr)
 
-    # Print summary
+    # Print cost summary
+    tracker = get_cost_tracker()
+    tracker.print_summary()
+
+    # Print completion summary
     print("\n" + "=" * 60)
     print(f"Completed: {len(per_metric_html)} successful, {len(failed_metrics)} failed")
     if failed_metrics:

@@ -1,7 +1,12 @@
-from jinja2 import Environment, FileSystemLoader
-from report_agent.dbt_context.from_docs_json import load_manifest, get_model_node, get_column_metadata
-from report_agent.utils.config_loader import load_configs
+from __future__ import annotations
+
 from importlib.resources import files
+from typing import Optional
+
+from jinja2 import Environment, FileSystemLoader
+
+from report_agent.config import AppConfig
+from report_agent.dbt_context.from_docs_json import load_manifest, get_model_node, get_column_metadata
 
 template_dir = files("report_agent.nlg") / "templates"
 
@@ -17,6 +22,7 @@ def build_ci_prompt(
     csv_filename: str,
     schema_filename: str,
     meta_filename: str,
+    config: AppConfig,
     docs_filename: str = None,
     kind: str = "time_series",
     has_catalog: bool = False,
@@ -32,6 +38,7 @@ def build_ci_prompt(
     
     pre_fetched_models: Dict mapping model_name -> csv_filename for pre-fetched related models
     catalog: Full model catalog dict (for template to reference model descriptions)
+    config: AppConfig instance for accessing dbt manifest settings
     """
     if kind == "snapshot":
         template_name = "ci_snapshot_prompt.j2"
@@ -46,8 +53,8 @@ def build_ci_prompt(
     if not model_description:
         # Fallback: try to load from manifest
         try:
-            cfg = load_configs()
-            manifest = load_manifest(cfg)
+            cfg_dict = config.to_dict()
+            manifest = load_manifest(cfg_dict)
             node = get_model_node(manifest, model)
             if node:
                 model_description = node.get("description", "")

@@ -1,10 +1,21 @@
+from __future__ import annotations
+
 from report_agent.connectors.db.clickhouse_connector import ClickHouseConnector
 from report_agent.metrics.metrics_registry import MetricsRegistry
 
+
 class MetricsLoader:
-    def __init__(self):
-        self.db       = ClickHouseConnector()
-        self.registry = MetricsRegistry()
+    """
+    Loads metric data from ClickHouse.
+    
+    Args:
+        db: ClickHouseConnector instance for database access.
+        registry: MetricsRegistry instance for metric metadata.
+    """
+    
+    def __init__(self, db: ClickHouseConnector, registry: MetricsRegistry):
+        self.db = db
+        self.registry = registry
 
     def fetch_time_series(self, model: str, lookback_days: int = None):
         """

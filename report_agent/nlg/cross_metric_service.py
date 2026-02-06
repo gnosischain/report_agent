@@ -17,11 +17,12 @@ from typing import Dict, List
 import httpx
 from openai import OpenAI
 
+from report_agent.config import AppConfig
 from report_agent.dbt_context.from_docs_json import (
     build_model_catalog,
     save_catalog_to_file,
 )
-from report_agent.utils.config_loader import load_configs
+from report_agent.utils.cost_tracker import get_cost_tracker
 
 log = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ log = logging.getLogger(__name__)
 def generate_cross_metric_analysis(
     metric_findings: Dict[str, dict],  # metric_name -> {narrative, structured, validation_status}
     metric_data_files: Dict[str, str],  # metric_name -> path to CSV
+    config: AppConfig,
     out_dir: str = "reports",
 ) -> dict:
     """
@@ -44,6 +46,7 @@ def generate_cross_metric_analysis(
     Args:
         metric_findings: Dict mapping metric names to their analysis results
         metric_data_files: Dict mapping metric names to CSV file paths
+        config: AppConfig instance
         out_dir: Output directory for saving results
         
     Returns:
@@ -80,10 +83,10 @@ def generate_cross_metric_analysis(
             return {}
         
         # 3. Build catalog
-        cfg = load_configs()
+        cfg_dict = config.to_dict()
         catalog = {}
         try:
-            catalog = build_model_catalog(cfg)
+            catalog = build_model_catalog(cfg_dict)
         except Exception as e:
             log.warning(f"Could not build model catalog: {e}")
         
@@ -98,7 +101,7 @@ def generate_cross_metric_analysis(
         # 5. Upload files to OpenAI
         # Disable retries to save credits
         client = OpenAI(
-            api_key=cfg["llm"]["api_key"],
+            api_key=config.llm.api_key,
             max_retries=0,  # Disable retries
             http_client=httpx.Client(
                 timeout=httpx.Timeout(300.0, connect=10.0),  # 5 min total, 10s connect
@@ -123,7 +126,7 @@ def generate_cross_metric_analysis(
                 file_ids.append(client.files.create(file=f, purpose="assistants").id)
         
         # 6. Run analysis with Code Interpreter
-        model_name = cfg["llm"]["model"]
+        model_name = config.llm.model
         try:
             resp = client.responses.create(
                 model=model_name,
@@ -140,6 +143,17 @@ def generate_cross_metric_analysis(
                 input=prompt,
                 temperature=0.2,
             )
+            
+            # Track API usage/cost
+            usage = getattr(resp, "usage", None)
+            if usage:
+                tracker = get_cost_tracker()
+                tracker.record_usage(
+                    category="cross_metric",
+                    model=model_name,
+                    input_tokens=getattr(usage, "input_tokens", 0) or 0,
+                    output_tokens=getattr(usage, "output_tokens", 0) or 0,
+                )
             
             analysis_text = getattr(resp, "output_text", None) or str(resp)
             

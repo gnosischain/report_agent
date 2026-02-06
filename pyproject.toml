@@ -32,5 +32,12 @@ dev = [
   "flake8>=7.3.0",
 ]
 
+[tool.setuptools.package-data]
+report_agent = [
+    "nlg/templates/*.j2",
+    "nlg/templates/static/*.css",
+    "metrics/*.yml",
+]
+
 [project.scripts]
 report-agent = "report_agent.cli.main:main"
