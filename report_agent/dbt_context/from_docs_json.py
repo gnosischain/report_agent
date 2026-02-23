@@ -180,6 +180,36 @@ def find_related_models(
     return [name for name, _ in sorted_related[:max_related]]
 
 
+def build_slim_catalog(cfg: Dict[str, Any]) -> Dict[str, str]:
+    """
+    Lightweight catalog: {model_name: description} only.
+
+    ~70-80% smaller than build_model_catalog() because it omits columns,
+    column_details, tags, etc.  Intended for embedding directly in prompts
+    so the LLM can still suggest related metrics without uploading a big file.
+    """
+    try:
+        manifest = load_manifest(cfg)
+    except Exception:
+        return {}
+
+    project = manifest.get("metadata", {}).get("project_name", "cerebro")
+    slim: Dict[str, str] = {}
+
+    for node_key, node in manifest.get("nodes", {}).items():
+        if not node_key.startswith(f"model.{project}."):
+            continue
+        tags = node.get("tags", [])
+        if "production" not in tags:
+            continue
+        model_name = node_key.split(".", 2)[-1]
+        desc = (node.get("description", "") or "").strip()
+        if desc:
+            slim[model_name] = desc
+
+    return slim
+
+
 def save_catalog_to_file(catalog: Dict[str, Any], filepath: str):
     """Save catalog as JSON for the model to read."""
     Path(filepath).parent.mkdir(parents=True, exist_ok=True)

@@ -25,9 +25,8 @@ def build_ci_prompt(
     config: AppConfig,
     docs_filename: str = None,
     kind: str = "time_series",
-    has_catalog: bool = False,
+    slim_catalog: dict = None,
     pre_fetched_models: dict = None,
-    catalog: dict = None,
 ) -> str:
     """
     Build the CI prompt for a given model.
@@ -35,9 +34,9 @@ def build_ci_prompt(
     kind:
       - "time_series": weekly trend analysis with plots
       - "snapshot":    one-off KPI snapshot (value + change_pct, etc.)
-    
+
+    slim_catalog: {model_name: description} dict for inline prompt embedding
     pre_fetched_models: Dict mapping model_name -> csv_filename for pre-fetched related models
-    catalog: Full model catalog dict (for template to reference model descriptions)
     config: AppConfig instance for accessing dbt manifest settings
     """
     if kind == "snapshot":
@@ -45,13 +44,11 @@ def build_ci_prompt(
     else:
         template_name = "ci_report_prompt.j2"
 
-    # Extract model description from catalog or dbt
-    model_description = ""
-    if catalog and model in catalog:
-        model_description = catalog[model].get("description", "")
-    
+    slim_catalog = slim_catalog or {}
+
+    model_description = slim_catalog.get(model, "")
+
     if not model_description:
-        # Fallback: try to load from manifest
         try:
             cfg_dict = config.to_dict()
             manifest = load_manifest(cfg_dict)
@@ -71,7 +68,6 @@ def build_ci_prompt(
         meta_filename=meta_filename,
         docs_filename=docs_filename,
         kind=kind,
-        has_catalog=has_catalog,
+        slim_catalog=slim_catalog,
         pre_fetched_models=pre_fetched_models or {},
-        catalog=catalog or {},
     )
