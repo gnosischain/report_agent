@@ -58,6 +58,15 @@ class ClaudeAnalyzer(LLMAnalyzer):
             input_tokens = getattr(usage, "input_tokens", 0) or 0
             output_tokens = getattr(usage, "output_tokens", 0) or 0
 
+            cache_created = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            if cache_created or cache_read:
+                log.debug(
+                    f"Cache stats [{metric_name}]: "
+                    f"created={cache_created:,}, read={cache_read:,} "
+                    f"(of {input_tokens:,} input tokens)"
+                )
+
             tracker = get_cost_tracker()
             tracker.record_usage(
                 category="per_metric",
@@ -81,10 +90,14 @@ class ClaudeAnalyzer(LLMAnalyzer):
         # Upload files via Files API
         file_ids = self._upload_files(context)
 
-        # Build message content: text prompt + file references
+        # Build message content: text prompt + file references.
+        # The last block gets cache_control so the entire user message is
+        # cached across pause_turn continuations (huge input-token savings).
         content: list = [{"type": "text", "text": context.prompt}]
         for fid in file_ids:
             content.append({"type": "container_upload", "file_id": fid})
+        if content:
+            content[-1]["cache_control"] = {"type": "ephemeral"}
 
         try:
             log.debug(f"Calling Anthropic API for model '{model}'")
