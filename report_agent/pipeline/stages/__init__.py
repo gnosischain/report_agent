@@ -10,6 +10,7 @@ from report_agent.pipeline.stages.data_fetcher import DataFetcher
 from report_agent.pipeline.stages.context_builder import ContextBuilder
 from report_agent.pipeline.stages.llm_analyzer import LLMAnalyzer
 from report_agent.pipeline.stages.openai_analyzer import OpenAIAnalyzer
+from report_agent.pipeline.stages.claude_analyzer import ClaudeAnalyzer
 from report_agent.pipeline.stages.validator import ResultValidator
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "ContextBuilder",
     "LLMAnalyzer",
     "OpenAIAnalyzer",
+    "ClaudeAnalyzer",
     "ResultValidator",
 ]
