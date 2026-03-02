@@ -1,5 +1,5 @@
 """
-Cost tracking for OpenAI API usage.
+Cost tracking for LLM API usage (OpenAI + Anthropic).
 
 Aggregates token usage across multiple API calls and provides cost estimates.
 Thread-safe for use with parallel metric processing.
@@ -35,14 +35,20 @@ from typing import Dict, List, Optional
 log = logging.getLogger(__name__)
 
 
-# Approximate pricing per 1K tokens (as of early 2025)
-# These should be updated as OpenAI changes pricing
+# Approximate pricing per 1K tokens
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
+    # OpenAI
     "gpt-4.1": {"input": 0.01, "output": 0.03},
     "gpt-4.1-mini": {"input": 0.0004, "output": 0.0016},
     "gpt-4o": {"input": 0.005, "output": 0.015},
     "gpt-4o-mini": {"input": 0.00015, "output": 0.0006},
     "gpt-4-turbo": {"input": 0.01, "output": 0.03},
+    # Anthropic
+    "claude-opus-4-6": {"input": 0.015, "output": 0.075},
+    "claude-sonnet-4-6": {"input": 0.003, "output": 0.015},
+    "claude-sonnet-4-5-20250929": {"input": 0.003, "output": 0.015},
+    "claude-sonnet-4-20250514": {"input": 0.003, "output": 0.015},
+    "claude-haiku-4-5-20251001": {"input": 0.0008, "output": 0.004},
     # Default fallback
     "default": {"input": 0.01, "output": 0.03},
 }

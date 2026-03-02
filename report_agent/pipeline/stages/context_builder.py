@@ -22,8 +22,7 @@ from report_agent.dbt_context.from_docs_json import (
     load_manifest,
     get_model_node,
     get_column_metadata,
-    build_model_catalog,
-    save_catalog_to_file,
+    build_slim_catalog,
 )
 from report_agent.nlg.prompt_builder import build_ci_prompt
 from report_agent.pipeline.models import MetricData, AnalysisContext
@@ -86,8 +85,8 @@ class ContextBuilder:
             # Optional: dbt docs
             docs_path = self._build_docs(model, tmpdir)
             
-            # Optional: catalog
-            catalog_path, catalog = self._build_catalog(tmpdir)
+            # Optional: slim catalog (embedded in prompt, no file upload)
+            slim_catalog = self._build_slim_catalog()
             
             # Build prompt
             prompt = build_ci_prompt(
@@ -98,9 +97,7 @@ class ContextBuilder:
                 schema_filename=schema_path.name,
                 meta_filename=meta_path.name,
                 docs_filename=docs_path.name if docs_path else None,
-                has_catalog=catalog_path is not None,
-                pre_fetched_models={},  # Not used for per-metric reports
-                catalog=catalog if catalog_path else None,
+                slim_catalog=slim_catalog,
                 config=self._config,
             )
             
@@ -114,7 +111,7 @@ class ContextBuilder:
                 schema_path=schema_path,
                 meta_path=meta_path,
                 docs_path=docs_path,
-                catalog_path=catalog_path,
+                catalog_path=None,
                 prompt=prompt,
                 df=df,
                 temp_dir=tmpdir,
@@ -199,14 +196,10 @@ class ContextBuilder:
             log.debug(f"Could not build dbt docs for '{model}': {e}")
             return None
     
-    def _build_catalog(self, tmpdir: Path) -> tuple[Optional[Path], dict]:
-        """Build model catalog (best-effort, returns (None, {}) on failure)."""
+    def _build_slim_catalog(self) -> dict:
+        """Build slim model catalog for prompt embedding (no file upload)."""
         try:
-            catalog = build_model_catalog(self.cfg)
-            if catalog:
-                catalog_path = tmpdir / "model_catalog.json"
-                save_catalog_to_file(catalog, str(catalog_path))
-                return catalog_path, catalog
+            return build_slim_catalog(self.cfg)
         except Exception as e:
-            log.debug(f"Could not build model catalog: {e}")
-        return None, {}
+            log.debug(f"Could not build slim catalog: {e}")
+            return {}

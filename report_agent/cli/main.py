@@ -9,10 +9,10 @@ import json
 
 from report_agent.config import get_config, AppConfig
 from report_agent.connectors.db.clickhouse_connector import ClickHouseConnector
+from report_agent.connectors.llm import create_analyzer
 from report_agent.metrics.metrics_loader import MetricsLoader
 from report_agent.metrics.metrics_registry import MetricsRegistry
 from report_agent.pipeline import ReportPipeline
-from report_agent.pipeline.stages import OpenAIAnalyzer
 from report_agent.pipeline.stages.data_fetcher import DataFetcher
 from report_agent.pipeline.stages.context_builder import ContextBuilder
 from report_agent.pipeline.exceptions import PipelineError
@@ -56,9 +56,9 @@ def main():
     # Reset cost tracker for this run
     reset_cost_tracker()
 
-    # Extract LLM settings from typed config
-    api_key = config.llm.api_key
-    openai_model_name = config.llm.model
+    log_provider = config.llm.provider
+    log_model = config.llm.get_active_model()
+    print(f"Using LLM provider: {log_provider} ({log_model})")
 
     # Initialize shared dependencies (composition root)
     # NOTE: Only registry is shared - it's read-only after initialization.
@@ -117,7 +117,7 @@ def main():
             db = ClickHouseConnector(config=config.clickhouse)
             loader = MetricsLoader(db=db, registry=registry)
             
-            analyzer = OpenAIAnalyzer(api_key=api_key, model_name=openai_model_name)
+            analyzer = create_analyzer(config.llm)
             data_fetcher = DataFetcher(registry=registry, loader=loader)
             context_builder = ContextBuilder(config=config)
             pipeline = ReportPipeline(

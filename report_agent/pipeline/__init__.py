@@ -5,15 +5,17 @@ Pipeline architecture for report generation.
 This module provides a clean, testable pipeline for generating metric reports:
 - DataFetcher: Fetches raw data from ClickHouse
 - ContextBuilder: Prepares files and prompts for LLM analysis
-- LLMAnalyzer: Runs LLM analysis (abstract base with OpenAI implementation)
+- LLMAnalyzer: Runs LLM analysis (OpenAI Code Interpreter or Claude Code Execution)
 - ResultValidator: Validates LLM output against actual data
 - ReportPipeline: Orchestrates the full pipeline
 
 Usage:
     from report_agent.pipeline import ReportPipeline
-    from report_agent.pipeline.stages import OpenAIAnalyzer
+    from report_agent.connectors.llm import create_analyzer
+    from report_agent.config import get_config
 
-    analyzer = OpenAIAnalyzer(api_key="...", model_name="gpt-4.1")
+    config = get_config()
+    analyzer = create_analyzer(config.llm)
     pipeline = ReportPipeline(llm_analyzer=analyzer)
     result = pipeline.run("api_p2p_discv4_clients_daily")
 """

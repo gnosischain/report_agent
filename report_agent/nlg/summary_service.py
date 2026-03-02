@@ -9,10 +9,10 @@ from typing import Dict, List, Optional, Tuple
 
 from importlib.resources import files
 from jinja2 import Environment, FileSystemLoader
-from openai import OpenAI
 import markdown
 
 from report_agent.config import AppConfig
+from report_agent.connectors.llm import create_chat_client, create_chat_completion
 from report_agent.dbt_context.from_docs_json import (
     load_manifest,
     get_model_node,
@@ -347,30 +347,25 @@ def generate_weekly_report(
         cross_metric_insights=cross_metric_insights,
     )
 
-    api_key = config.llm.api_key
-    model_name = config.llm.model
+    client, model_name, provider = create_chat_client(config.llm)
 
-    client = OpenAI(api_key=api_key)
-    resp = client.chat.completions.create(
+    full_output, input_tokens, output_tokens = create_chat_completion(
+        client=client,
         model=model_name,
-        messages=[
-            {"role": "system", "content": "You are a senior data analyst writing a unified weekly report."},
-            {"role": "user", "content": prompt},
-        ],
+        provider=provider,
+        system_prompt="You are a senior data analyst writing a unified weekly report.",
+        user_prompt=prompt,
         temperature=0.3,
     )
-    
+
     # Track API usage/cost
-    if resp.usage:
-        tracker = get_cost_tracker()
-        tracker.record_usage(
-            category="summary",
-            model=model_name,
-            input_tokens=resp.usage.prompt_tokens or 0,
-            output_tokens=resp.usage.completion_tokens or 0,
-        )
-    
-    full_output = resp.choices[0].message.content or ""
+    tracker = get_cost_tracker()
+    tracker.record_usage(
+        category="summary",
+        model=model_name,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+    )
 
     highlighted = _parse_highlighted_metrics(full_output)
     summary_markdown = _strip_highlight_header(full_output)

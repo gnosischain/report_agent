@@ -65,6 +65,20 @@ class LLMConfig:
     model: str = "gpt-4.1"
     api_key: str = ""
     gemini_api_key: str = ""
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-20250514"
+    
+    def get_active_api_key(self) -> str:
+        """Return the API key for the currently selected provider."""
+        if self.provider == "anthropic":
+            return self.anthropic_api_key
+        return self.api_key
+    
+    def get_active_model(self) -> str:
+        """Return the model name for the currently selected provider."""
+        if self.provider == "anthropic":
+            return self.anthropic_model
+        return self.model
     
     def to_dict(self) -> dict:
         """Convert to dictionary for backward compatibility."""
@@ -74,6 +88,8 @@ class LLMConfig:
             "api_key": self.api_key,
             "openai_api_key": self.api_key,  # Alias for backward compat
             "gemini_api_key": self.gemini_api_key,
+            "anthropic_api_key": self.anthropic_api_key,
+            "anthropic_model": self.anthropic_model,
         }
 
 
@@ -144,6 +160,8 @@ class AppConfig:
                 model=os.getenv("OPENAI_MODEL", "gpt-4.1"),
                 api_key=os.getenv("OPENAI_API_KEY", ""),
                 gemini_api_key=os.getenv("GEMINI_API_KEY", ""),
+                anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
+                anthropic_model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
             ),
             dbt_docs=DbtDocsConfig(
                 base_url=os.getenv("DBT_DOCS_BASE_URL"),
@@ -166,10 +184,17 @@ class AppConfig:
         errors = []
         
         if require_llm:
-            if not self.llm.api_key:
-                errors.append("OPENAI_API_KEY not found in environment")
-            if not self.llm.model:
-                errors.append("OPENAI_MODEL not configured")
+            provider = self.llm.provider
+            if provider == "anthropic":
+                if not self.llm.anthropic_api_key:
+                    errors.append("ANTHROPIC_API_KEY not found in environment")
+                if not self.llm.anthropic_model:
+                    errors.append("ANTHROPIC_MODEL not configured")
+            else:
+                if not self.llm.api_key:
+                    errors.append("OPENAI_API_KEY not found in environment")
+                if not self.llm.model:
+                    errors.append("OPENAI_MODEL not configured")
         
         if require_db:
             if not self.clickhouse.host:

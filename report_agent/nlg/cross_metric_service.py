@@ -9,15 +9,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Dict, List
 
-import httpx
-from openai import OpenAI
-
 from report_agent.config import AppConfig
+from report_agent.connectors.llm import create_code_execution_client
 from report_agent.dbt_context.from_docs_json import (
     build_model_catalog,
     save_catalog_to_file,
@@ -98,64 +97,34 @@ def generate_cross_metric_analysis(
         analyzed_metrics = list(metric_findings.keys())
         prompt = _build_cross_metric_prompt(metric_findings, data_files, catalog, analyzed_metrics)
         
-        # 5. Upload files to OpenAI
-        # Disable retries to save credits
-        client = OpenAI(
-            api_key=config.llm.api_key,
-            max_retries=0,  # Disable retries
-            http_client=httpx.Client(
-                timeout=httpx.Timeout(300.0, connect=10.0),  # 5 min total, 10s connect
-                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
-            ),
-        )
-        file_ids = []
-        
-        # Upload findings
-        with open(findings_path, "rb") as f:
-            file_ids.append(client.files.create(file=f, purpose="assistants").id)
-        
-        # Upload all CSVs
+        # 5. Collect all file paths to upload
+        upload_paths: List[str] = [findings_path]
         for metric_name, filename in data_files.items():
-            csv_path = os.path.join(tmpdir, filename)
-            with open(csv_path, "rb") as f:
-                file_ids.append(client.files.create(file=f, purpose="assistants").id)
-        
-        # Upload catalog if available
+            upload_paths.append(os.path.join(tmpdir, filename))
         if catalog and Path(catalog_path).exists():
-            with open(catalog_path, "rb") as f:
-                file_ids.append(client.files.create(file=f, purpose="assistants").id)
+            upload_paths.append(catalog_path)
         
-        # 6. Run analysis with Code Interpreter
-        model_name = config.llm.model
+        # 6. Run analysis via provider-agnostic code execution
+        client, model_name, provider = create_code_execution_client(config.llm)
+        
         try:
-            resp = client.responses.create(
-                model=model_name,
-                tools=[{
-                    "type": "code_interpreter",
-                    "container": {
-                        "type": "auto",
-                        "file_ids": file_ids,
-                    }
-                }],
-                tool_choice="required",
-                max_tool_calls=10,
-                instructions="You are a data analyst performing cross-metric correlation analysis. Use Python to analyze the data.",
-                input=prompt,
-                temperature=0.2,
-            )
-            
-            # Track API usage/cost
-            usage = getattr(resp, "usage", None)
-            if usage:
-                tracker = get_cost_tracker()
-                tracker.record_usage(
-                    category="cross_metric",
-                    model=model_name,
-                    input_tokens=getattr(usage, "input_tokens", 0) or 0,
-                    output_tokens=getattr(usage, "output_tokens", 0) or 0,
+            if provider == "anthropic":
+                analysis_text, input_tokens, output_tokens = _run_anthropic_cross_metric(
+                    client, model_name, prompt, upload_paths,
+                )
+            else:
+                analysis_text, input_tokens, output_tokens = _run_openai_cross_metric(
+                    client, model_name, prompt, upload_paths,
                 )
             
-            analysis_text = getattr(resp, "output_text", None) or str(resp)
+            # Track API usage/cost
+            tracker = get_cost_tracker()
+            tracker.record_usage(
+                category="cross_metric",
+                model=model_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
             
             # Parse structured output
             cross_metric_insights = _parse_cross_metric_output(analysis_text)
@@ -167,7 +136,6 @@ def generate_cross_metric_analysis(
             return cross_metric_insights
         except Exception as e:
             log.error(f"Cross-metric analysis API call failed: {e}")
-            # Return empty insights instead of crashing - allows summary to proceed
             return {}
         
     finally:
@@ -176,6 +144,122 @@ def generate_cross_metric_analysis(
             shutil.rmtree(tmpdir)
         except Exception:
             pass
+
+
+def _run_openai_cross_metric(
+    client, model_name: str, prompt: str, file_paths: List[str],
+) -> tuple[str, int, int]:
+    """Run cross-metric analysis via OpenAI Code Interpreter."""
+    file_ids = []
+    for path in file_paths:
+        with open(path, "rb") as f:
+            file_ids.append(client.files.create(file=f, purpose="assistants").id)
+
+    resp = client.responses.create(
+        model=model_name,
+        tools=[{
+            "type": "code_interpreter",
+            "container": {"type": "auto", "file_ids": file_ids},
+        }],
+        tool_choice="required",
+        max_tool_calls=10,
+        instructions=(
+            "You are a data analyst performing cross-metric correlation analysis. "
+            "Use Python to analyze the data."
+        ),
+        input=prompt,
+        temperature=0.2,
+    )
+
+    usage = getattr(resp, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", 0) or 0 if usage else 0
+    output_tokens = getattr(usage, "output_tokens", 0) or 0 if usage else 0
+    text = getattr(resp, "output_text", None) or str(resp)
+    return text, input_tokens, output_tokens
+
+
+def _run_anthropic_cross_metric(
+    client, model_name: str, prompt: str, file_paths: List[str],
+) -> tuple[str, int, int]:
+    """Run cross-metric analysis via Anthropic Code Execution."""
+    _FILES_BETA = "files-api-2025-04-14"
+    _CODE_EXEC_TOOL = {"type": "code_execution_20250825", "name": "code_execution"}
+
+    # Upload files via Files API
+    file_ids = []
+    for path in file_paths:
+        with open(path, "rb") as f:
+            file_obj = client.beta.files.upload(file=f, betas=[_FILES_BETA])
+        file_ids.append(file_obj.id)
+
+    # Build message content
+    content: list = [{"type": "text", "text": prompt}]
+    for fid in file_ids:
+        content.append({"type": "container_upload", "file_id": fid})
+
+    resp = client.beta.messages.create(
+        model=model_name,
+        betas=[_FILES_BETA],
+        max_tokens=16384,
+        messages=[{"role": "user", "content": content}],
+        tools=[_CODE_EXEC_TOOL],
+    )
+
+    # Handle pause_turn
+    messages = [{"role": "user", "content": content}]
+    for _ in range(8):
+        if getattr(resp, "stop_reason", None) != "pause_turn":
+            break
+        messages.append({"role": "assistant", "content": resp.content})
+        container_id = resp.container.id if hasattr(resp, "container") else None
+        kwargs = dict(
+            model=model_name, betas=[_FILES_BETA], max_tokens=16384,
+            messages=messages, tools=[_CODE_EXEC_TOOL],
+        )
+        if container_id:
+            kwargs["container"] = container_id
+        resp = client.beta.messages.create(**kwargs)
+
+    # Extract only final text (after last tool-result block)
+    content = resp.content or []
+    last_tool_idx = -1
+    for i, item in enumerate(content):
+        itype = getattr(item, "type", None)
+        if itype in ("bash_code_execution_tool_result",
+                      "text_editor_code_execution_tool_result",
+                      "server_tool_use"):
+            last_tool_idx = i
+
+    parts = []
+    for i, item in enumerate(content):
+        if getattr(item, "type", None) == "text" and i > last_tool_idx:
+            parts.append(getattr(item, "text", ""))
+    text = "\n".join(p for p in parts if p)
+
+    # If no text after tool results, try all text blocks
+    if not text:
+        all_parts = []
+        for item in content:
+            if getattr(item, "type", None) == "text":
+                all_parts.append(getattr(item, "text", ""))
+        text = "\n".join(p for p in all_parts if p)
+
+    # Last resort: extract from stdout (never use str(resp))
+    if not text:
+        for item in content:
+            if getattr(item, "type", None) == "bash_code_execution_tool_result":
+                ci = getattr(item, "content", None)
+                if ci:
+                    stdout = getattr(ci, "stdout", "")
+                    if stdout:
+                        text = stdout
+                        break
+    text = text or ""
+
+    usage = getattr(resp, "usage", None)
+    input_tokens = getattr(usage, "input_tokens", 0) or 0 if usage else 0
+    output_tokens = getattr(usage, "output_tokens", 0) or 0 if usage else 0
+    return text, input_tokens, output_tokens
 
 
 def _build_cross_metric_prompt(
@@ -291,7 +375,6 @@ Then provide a detailed narrative analysis after the JSON block.
 
 def _parse_cross_metric_output(text: str) -> dict:
     """Parse structured output from cross-metric analysis."""
-    import re
     json_match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
     if json_match:
         try:
