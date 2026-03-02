@@ -21,6 +21,7 @@ from report_agent.dbt_context.from_docs_json import (
     build_model_catalog,
     save_catalog_to_file,
 )
+from report_agent.utils.anthropic_retry import call_with_rate_limit_retry
 from report_agent.utils.cost_tracker import get_cost_tracker
 
 log = logging.getLogger(__name__)
@@ -197,12 +198,15 @@ def _run_anthropic_cross_metric(
     for fid in file_ids:
         content.append({"type": "container_upload", "file_id": fid})
 
-    resp = client.beta.messages.create(
-        model=model_name,
-        betas=[_FILES_BETA],
-        max_tokens=16384,
-        messages=[{"role": "user", "content": content}],
-        tools=[_CODE_EXEC_TOOL],
+    resp = call_with_rate_limit_retry(
+        lambda: client.beta.messages.create(
+            model=model_name,
+            betas=[_FILES_BETA],
+            max_tokens=16384,
+            messages=[{"role": "user", "content": content}],
+            tools=[_CODE_EXEC_TOOL],
+        ),
+        label="cross_metric",
     )
 
     # Handle pause_turn
@@ -218,7 +222,10 @@ def _run_anthropic_cross_metric(
         )
         if container_id:
             kwargs["container"] = container_id
-        resp = client.beta.messages.create(**kwargs)
+        resp = call_with_rate_limit_retry(
+            lambda: client.beta.messages.create(**kwargs),
+            label="cross_metric_continuation",
+        )
 
     # Extract only final text (after last tool-result block)
     content = resp.content or []

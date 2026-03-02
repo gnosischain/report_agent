@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from report_agent.utils.anthropic_retry import call_with_rate_limit_retry
+
 if TYPE_CHECKING:
     from report_agent.config import LLMConfig
     from report_agent.pipeline.stages.llm_analyzer import LLMAnalyzer
@@ -90,12 +92,15 @@ def create_chat_completion(
         (response_text, input_tokens, output_tokens)
     """
     if provider == "anthropic":
-        resp = client.messages.create(
-            model=model,
-            max_tokens=8192,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            temperature=temperature,
+        resp = call_with_rate_limit_retry(
+            lambda: client.messages.create(
+                model=model,
+                max_tokens=8192,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+                temperature=temperature,
+            ),
+            label="chat_completion",
         )
         text = ""
         for block in (resp.content or []):

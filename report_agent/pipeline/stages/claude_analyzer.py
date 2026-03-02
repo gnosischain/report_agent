@@ -20,6 +20,7 @@ import anthropic
 from report_agent.pipeline.models import AnalysisContext, RawAnalysis
 from report_agent.pipeline.stages.llm_analyzer import LLMAnalyzer
 from report_agent.pipeline.exceptions import AnalysisError
+from report_agent.utils.anthropic_retry import call_with_rate_limit_retry
 from report_agent.utils.cost_tracker import get_cost_tracker
 
 log = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 _FILES_BETA = "files-api-2025-04-14"
 _CODE_EXEC_TOOL = {"type": "code_execution_20250825", "name": "code_execution"}
 _MAX_PAUSE_RETRIES = 8
+_MAX_TOKENS = 32768
 
 
 class ClaudeAnalyzer(LLMAnalyzer):
@@ -101,12 +103,19 @@ class ClaudeAnalyzer(LLMAnalyzer):
 
         try:
             log.debug(f"Calling Anthropic API for model '{model}'")
-            resp = self.client.beta.messages.create(
-                model=self.model_name,
-                betas=[_FILES_BETA],
-                max_tokens=16384,
-                messages=[{"role": "user", "content": content}],
-                tools=[_CODE_EXEC_TOOL],
+
+            def _initial_call():
+                with self.client.beta.messages.stream(
+                    model=self.model_name,
+                    betas=[_FILES_BETA],
+                    max_tokens=_MAX_TOKENS,
+                    messages=[{"role": "user", "content": content}],
+                    tools=[_CODE_EXEC_TOOL],
+                ) as stream:
+                    return stream.get_final_message()
+
+            resp = call_with_rate_limit_retry(
+                _initial_call, label=f"analysis:{model}",
             )
         except Exception as e:
             error_msg = str(e)
@@ -164,14 +173,20 @@ class ClaudeAnalyzer(LLMAnalyzer):
                 kwargs = dict(
                     model=self.model_name,
                     betas=[_FILES_BETA],
-                    max_tokens=16384,
+                    max_tokens=_MAX_TOKENS,
                     messages=messages,
                     tools=[_CODE_EXEC_TOOL],
                 )
                 if container_id:
                     kwargs["container"] = container_id
 
-                resp = self.client.beta.messages.create(**kwargs)
+                def _continue():
+                    with self.client.beta.messages.stream(**kwargs) as s:
+                        return s.get_final_message()
+
+                resp = call_with_rate_limit_retry(
+                    _continue, label="pause_turn_continuation",
+                )
 
                 # Accumulate usage across continuations
                 self._record_usage(resp, "pause_turn_continuation")
