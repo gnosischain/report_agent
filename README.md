@@ -17,7 +17,7 @@ The model receives **raw tables** (CSV) plus neutral context (schema, meta, opti
 * **Multi-provider**: Switch between OpenAI and Anthropic via `LLM_PROVIDER` env var. Provider-agnostic abstraction via `LLMAnalyzer` interface.
 * **Free-form analysis**: Model runs Python in a sandbox (OpenAI Code Interpreter or Claude Code Execution), no fixed toolchain.
 * **Pipeline architecture**: Four isolated stages with dependency injection — testable and extensible.
-* **Parallel processing**: Concurrent metric processing with `--max-workers` (default 3). No automatic retries (`max_retries=0`) to save credits.
+* **Parallel processing**: Concurrent metric processing with `--max-workers` (default 3). Anthropic clients retry on rate limits (`max_retries=2`); OpenAI calls fail fast (`max_retries=0`).
 * **Structured output + validation**: LLM returns structured JSON with key numbers and statistical evidence, validated against actual data to prevent over-interpretation.
 * **Cross-metric analysis**: Discovers correlations, ecosystem patterns, and contradictions across metrics.
 * **Significance detection**: Strict criteria (>15% change, >2 std devs) prevent false positives — only truly noteworthy changes are reported.
@@ -202,7 +202,7 @@ metrics:
 * **Plots not visible in HTML**: Check that PNGs exist in `reports/plots/` and open the HTML from the same directory tree (paths are relative).
 * **No weekly report**: Ensure you didn't pass `--no-summary` and that at least one metric completed successfully.
 * **Parallel processing issues**: Try `--max-workers 1` for sequential execution.
-* **API connection errors**: External API issues, not code bugs. Failures are reported immediately (no retries).
+* **API connection errors**: External API issues, not code bugs. Anthropic clients auto-retry on rate limits (429); OpenAI failures are reported immediately.
 
 ---
 

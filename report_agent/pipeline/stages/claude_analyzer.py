@@ -20,7 +20,6 @@ import anthropic
 from report_agent.pipeline.models import AnalysisContext, RawAnalysis
 from report_agent.pipeline.stages.llm_analyzer import LLMAnalyzer
 from report_agent.pipeline.exceptions import AnalysisError
-from report_agent.utils.anthropic_retry import call_with_rate_limit_retry
 from report_agent.utils.cost_tracker import get_cost_tracker
 
 log = logging.getLogger(__name__)
@@ -48,7 +47,7 @@ class ClaudeAnalyzer(LLMAnalyzer):
 
         self.client = anthropic.Anthropic(
             api_key=api_key,
-            max_retries=0,
+            max_retries=2,
         )
 
         self._last_artifacts: Optional[dict] = None
@@ -103,20 +102,14 @@ class ClaudeAnalyzer(LLMAnalyzer):
 
         try:
             log.debug(f"Calling Anthropic API for model '{model}'")
-
-            def _initial_call():
-                with self.client.beta.messages.stream(
-                    model=self.model_name,
-                    betas=[_FILES_BETA],
-                    max_tokens=_MAX_TOKENS,
-                    messages=[{"role": "user", "content": content}],
-                    tools=[_CODE_EXEC_TOOL],
-                ) as stream:
-                    return stream.get_final_message()
-
-            resp = call_with_rate_limit_retry(
-                _initial_call, label=f"analysis:{model}",
-            )
+            with self.client.beta.messages.stream(
+                model=self.model_name,
+                betas=[_FILES_BETA],
+                max_tokens=_MAX_TOKENS,
+                messages=[{"role": "user", "content": content}],
+                tools=[_CODE_EXEC_TOOL],
+            ) as stream:
+                resp = stream.get_final_message()
         except Exception as e:
             error_msg = str(e)
             log.error(f"API call failed for {model}: {error_msg}")
@@ -149,17 +142,32 @@ class ClaudeAnalyzer(LLMAnalyzer):
             artifacts=self._last_artifacts,
         )
 
+    @staticmethod
+    def _needs_continuation(resp) -> bool:
+        """Check if response needs continuation (pause_turn or incomplete)."""
+        stop_reason = getattr(resp, "stop_reason", None)
+        if stop_reason == "pause_turn":
+            return True
+        if stop_reason is None:
+            content = resp.content or []
+            if content:
+                last_type = getattr(content[-1], "type", None)
+                if last_type == "server_tool_use":
+                    return True
+        return False
+
     def _handle_pause_turn(self, resp, original_content: list):
         """
         Handle pause_turn stop reason for long-running code execution.
 
         When the API pauses a long turn, we send the response back to let
         Claude continue where it left off, reusing the same container.
+        Also continues when stop_reason is None but response ends mid-tool-use.
         """
         messages = [{"role": "user", "content": original_content}]
 
         for i in range(_MAX_PAUSE_RETRIES):
-            if getattr(resp, "stop_reason", None) != "pause_turn":
+            if not self._needs_continuation(resp):
                 break
 
             log.debug(f"Received pause_turn (attempt {i + 1}), continuing...")
@@ -180,13 +188,8 @@ class ClaudeAnalyzer(LLMAnalyzer):
                 if container_id:
                     kwargs["container"] = container_id
 
-                def _continue():
-                    with self.client.beta.messages.stream(**kwargs) as s:
-                        return s.get_final_message()
-
-                resp = call_with_rate_limit_retry(
-                    _continue, label="pause_turn_continuation",
-                )
+                with self.client.beta.messages.stream(**kwargs) as stream:
+                    resp = stream.get_final_message()
 
                 # Accumulate usage across continuations
                 self._record_usage(resp, "pause_turn_continuation")
@@ -258,31 +261,54 @@ class ClaudeAnalyzer(LLMAnalyzer):
 
         return {"files": artifacts} if artifacts else None
 
+    @staticmethod
+    def _collect_stdout(resp) -> str:
+        """Collect all stdout from bash_code_execution_tool_result blocks."""
+        parts: List[str] = []
+        for item in (resp.content or []):
+            if getattr(item, "type", None) == "bash_code_execution_tool_result":
+                content_item = getattr(item, "content", None)
+                if content_item:
+                    stdout = getattr(content_item, "stdout", "")
+                    if stdout:
+                        parts.append(stdout)
+        return "\n".join(parts)
+
     def _parse_structured_output(self, resp) -> tuple[str, dict]:
         """
         Extract JSON and narrative from Claude's response.
 
         Strategy:
-        1. Collect ALL text blocks from the response (we need them to find
-           the JSON no matter where Claude placed it).
-        2. Extract the structured JSON.
-        3. For the narrative, only use text that appears AFTER the last
+        1. Collect ALL text blocks from the response.
+        2. Also collect stdout from code execution results (Claude often
+           prints its JSON output via a Python script).
+        3. Extract the structured JSON from text blocks OR stdout.
+        4. For the narrative, only use text that appears AFTER the last
            tool-result block, and strip any transitional preamble.
+        5. Never fall back to str(resp) -- that dumps the raw API object.
         """
         content = resp.content or []
 
-        # --- Step 1: Gather all text (for JSON extraction) ---
+        # --- Step 1: Gather all text blocks ---
         all_text_parts: List[str] = []
         for item in content:
             if getattr(item, "type", None) == "text":
                 all_text_parts.append(getattr(item, "text", ""))
         all_text = "\n".join(p for p in all_text_parts if p)
 
-        # --- Step 2: Extract structured JSON from anywhere in the response ---
+        # --- Step 1b: Gather stdout from code execution ---
+        all_stdout = self._collect_stdout(resp)
+
+        # Combined searchable text (text blocks + stdout)
+        searchable = all_text
+        if all_stdout:
+            searchable = f"{all_text}\n{all_stdout}" if all_text else all_stdout
+
+        # --- Step 2: Extract structured JSON ---
         structured = {}
         json_block_text = ""
 
-        # Try fenced ```json block first
+        # Try fenced ```json block first (in text blocks)
         json_match = re.search(r'```json\s*(\{.*?\})\s*```', all_text, re.DOTALL)
         if json_match:
             try:
@@ -291,13 +317,26 @@ class ClaudeAnalyzer(LLMAnalyzer):
             except json.JSONDecodeError:
                 pass
 
-        # Fallback: bare JSON with "significance" key
+        # Fallback: bare JSON with "significance" key (search text + stdout)
         if not structured:
-            json_match = re.search(r'\{[^{}]*"significance"[^{}]*\}', all_text, re.DOTALL)
+            json_match = re.search(
+                r'\{[^{}]*"significance"[^{}]*\}', searchable, re.DOTALL
+            )
             if json_match:
                 try:
                     structured = json.loads(json_match.group(0))
                     json_block_text = json_match.group(0)
+                except json.JSONDecodeError:
+                    pass
+
+        # Fallback: "FINAL JSON OUTPUT:" marker in stdout
+        if not structured and all_stdout:
+            marker_match = re.search(
+                r'FINAL JSON OUTPUT:\s*(\{.*)', all_stdout, re.DOTALL
+            )
+            if marker_match:
+                try:
+                    structured = json.loads(marker_match.group(1))
                 except json.JSONDecodeError:
                     pass
 
@@ -326,8 +365,16 @@ class ClaudeAnalyzer(LLMAnalyzer):
         # Strip Claude's transitional preamble lines
         narrative = self._strip_preamble(narrative).strip()
 
-        if not narrative and not structured:
-            narrative = all_text or str(resp)
+        # If narrative is empty but we have text blocks from before tool
+        # results, use the last one (sometimes Claude writes the narrative
+        # early then runs code afterwards).
+        if not narrative and all_text_parts:
+            candidate = all_text_parts[-1].strip()
+            if json_block_text:
+                candidate = candidate.replace(json_block_text, "").strip()
+            candidate = self._strip_preamble(candidate).strip()
+            if len(candidate) > 50:
+                narrative = candidate
 
         return narrative, structured
 
@@ -339,22 +386,38 @@ class ClaudeAnalyzer(LLMAnalyzer):
           "Now let me provide my analysis:"
           "Here is my assessment:"
           "Based on my analysis, here are my findings:"
+          "Perfect! The plot has been generated successfully. Now I can provide my analysis."
+          "Now I can provide the JSON and narrative analysis based on the data analysis:"
         """
+        _PREAMBLE_RE = re.compile(
+            r'^('
+            # "Now let me provide...", "Here is my...", "Based on my..."
+            r'(now\s+)?(let\s+me\s+|here\s+(is|are)\s+|based\s+on\s+)'
+            r'.{0,80}'
+            r'(analysis|assessment|findings|report|results|summary|narrative)\s*[:.]?'
+            r'|'
+            # "Perfect!", "Great!", "Excellent!" (standalone or followed by a sentence)
+            r'(perfect|great|excellent|done)[\s!.,]+'
+            r'(the\s+plot|the\s+chart|the\s+data|the\s+analysis|now\s+|let\s+me\s+|i\s+can\s+).{0,120}'
+            r'|'
+            # "Now I can provide..."
+            r'now\s+i\s+(can|will)\s+provide.{0,120}'
+            r'|'
+            # "I can provide the JSON and narrative..."
+            r'i\s+(can|will)\s+provide\s+(the\s+)?json.{0,120}'
+            r')\s*$',
+            re.IGNORECASE,
+        )
+
         lines = text.split("\n")
         cleaned: List[str] = []
         past_preamble = False
 
         for line in lines:
-            stripped = line.strip().lower()
+            stripped = line.strip()
             if not past_preamble and not stripped:
                 continue
-            if not past_preamble and re.match(
-                r'^(now\s+)?'
-                r'(let\s+me\s+|here\s+(is|are)\s+|based\s+on\s+)'
-                r'.{0,80}'
-                r'(analysis|assessment|findings|report|results|summary)\s*[:.]?\s*$',
-                stripped,
-            ):
+            if not past_preamble and _PREAMBLE_RE.match(stripped):
                 continue
             past_preamble = True
             cleaned.append(line)

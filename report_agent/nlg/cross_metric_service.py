@@ -21,7 +21,6 @@ from report_agent.dbt_context.from_docs_json import (
     build_model_catalog,
     save_catalog_to_file,
 )
-from report_agent.utils.anthropic_retry import call_with_rate_limit_retry
 from report_agent.utils.cost_tracker import get_cost_tracker
 
 log = logging.getLogger(__name__)
@@ -198,15 +197,12 @@ def _run_anthropic_cross_metric(
     for fid in file_ids:
         content.append({"type": "container_upload", "file_id": fid})
 
-    resp = call_with_rate_limit_retry(
-        lambda: client.beta.messages.create(
-            model=model_name,
-            betas=[_FILES_BETA],
-            max_tokens=16384,
-            messages=[{"role": "user", "content": content}],
-            tools=[_CODE_EXEC_TOOL],
-        ),
-        label="cross_metric",
+    resp = client.beta.messages.create(
+        model=model_name,
+        betas=[_FILES_BETA],
+        max_tokens=16384,
+        messages=[{"role": "user", "content": content}],
+        tools=[_CODE_EXEC_TOOL],
     )
 
     # Handle pause_turn
@@ -222,10 +218,7 @@ def _run_anthropic_cross_metric(
         )
         if container_id:
             kwargs["container"] = container_id
-        resp = call_with_rate_limit_retry(
-            lambda: client.beta.messages.create(**kwargs),
-            label="cross_metric_continuation",
-        )
+        resp = client.beta.messages.create(**kwargs)
 
     # Extract only final text (after last tool-result block)
     content = resp.content or []
@@ -241,7 +234,27 @@ def _run_anthropic_cross_metric(
     for i, item in enumerate(content):
         if getattr(item, "type", None) == "text" and i > last_tool_idx:
             parts.append(getattr(item, "text", ""))
-    text = "\n".join(p for p in parts if p) or str(resp)
+    text = "\n".join(p for p in parts if p)
+
+    # If no text after tool results, try all text blocks
+    if not text:
+        all_parts = []
+        for item in content:
+            if getattr(item, "type", None) == "text":
+                all_parts.append(getattr(item, "text", ""))
+        text = "\n".join(p for p in all_parts if p)
+
+    # Last resort: extract from stdout (never use str(resp))
+    if not text:
+        for item in content:
+            if getattr(item, "type", None) == "bash_code_execution_tool_result":
+                ci = getattr(item, "content", None)
+                if ci:
+                    stdout = getattr(ci, "stdout", "")
+                    if stdout:
+                        text = stdout
+                        break
+    text = text or ""
 
     usage = getattr(resp, "usage", None)
     input_tokens = getattr(usage, "input_tokens", 0) or 0 if usage else 0
